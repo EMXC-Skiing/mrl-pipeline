@@ -1,0 +1,27 @@
+# VSCode
+.vscode/
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+logs/
+
+# Temporary/System Files
+*.swp
+*.swo
+*.tmp
+*.bak
+*.orig
+*.~lock.*
+
+# Python
+env/
+venv/
+*.env

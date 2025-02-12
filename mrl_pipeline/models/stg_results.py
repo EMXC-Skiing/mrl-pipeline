@@ -13,8 +13,9 @@ import duckdb
 from duckdb import BinderException, DuckDBPyConnection
 from tqdm import tqdm
 
-from mrl_pipeline import duckdb_path, google_service_account_path
 from mrl_pipeline.data_connectors import DriveService
+from mrl_pipeline.models import PipelineModel
+from mrl_pipeline.utils import duckdb_path, google_service_account_path
 
 # Mapping of Google Sheets column names to staging table column names
 COLUMN_MAP = {
@@ -183,6 +184,8 @@ def main(db_path: str) -> None:
 
     return conn
 
+
+stg_results = PipelineModel
 
 if __name__ == "__main__":
     conn = main(db_path=duckdb_path)

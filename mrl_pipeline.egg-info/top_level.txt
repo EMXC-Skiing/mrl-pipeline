@@ -1,6 +1,0 @@
-config
-data
-db
-logs
-mrl_pipeline
-tests

@@ -13,3 +13,13 @@ dependencies = [
     "pytz>=2025.1",
     "tqdm>=4.67.1",
 ]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["D401", "D205"]
+fixable = ["ALL"]
+
+[tool.ruff]
+fix = true
+line-length = 88
+unsafe-fixes = true

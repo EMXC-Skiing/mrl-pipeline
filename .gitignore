@@ -1,3 +1,7 @@
+# project
+config/
+service.json
+
 # VSCode
 .vscode/
 .vscode/settings.json

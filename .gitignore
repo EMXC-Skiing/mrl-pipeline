@@ -1,6 +1,16 @@
 # project
 config/
+db/
 service.json
+
+# Python
+env/
+venv/
+*.env
+__pycache__/
+
+# database
+*.duckdb
 
 # VSCode
 .vscode/
@@ -24,8 +34,3 @@ logs/
 *.bak
 *.orig
 *.~lock.*
-
-# Python
-env/
-venv/
-*.env

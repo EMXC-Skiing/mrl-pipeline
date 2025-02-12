@@ -10,10 +10,10 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import duckdb
-from duckdb import DuckDBPyConnection
+from duckdb import BinderException, DuckDBPyConnection
 from tqdm import tqdm
 
-from mrl_pipeline import google_service_account_credentials
+from mrl_pipeline import duckdb_path, google_service_account_path
 from mrl_pipeline.data_connectors import DriveService
 
 # Mapping of Google Sheets column names to staging table column names
@@ -30,16 +30,17 @@ COLUMN_MAP = {
 
 def create_or_replace_staging_table(conn: DuckDBPyConnection) -> DuckDBPyConnection:
     """Creates or replaces the staging table for storing race results."""
+    query = """
+            CREATE OR REPLACE TABLE stg_results (
+                source_file_id VARCHAR,
+                race_id VARCHAR,
+                {},
+                created_at timestamp DEFAULT current_timestamp
+            );
+            """
     return conn.execute(
-        """
-        CREATE OR REPLACE TABLE stg_results (
-            source_file_id VARCHAR,
-            race_id VARCHAR,
-            {mapped_columns},
-            created_at timestamp DEFAULT current_timestamp
-        );
-        """.format(
-            mapped_columns=[",\n".join(f"{k} VARCHAR" for k in COLUMN_MAP)],
+        query.format(
+            ",\n".join(f"{k} VARCHAR" for k in COLUMN_MAP),
         ),
     )
 
@@ -80,16 +81,16 @@ def transform_results_and_insert_into_staging_table(
 
     # Create a temporary table from the Google Sheet CSV export
     conn.execute(
-        """
-        CREATE OR REPLACE TABLE ? AS
+        f"""
+        CREATE OR REPLACE TABLE "{temp_table_name}" AS
             SELECT *
             FROM read_csv(
                 ?,
                 auto_type_candidates = ['VARCHAR'],
                 header = true
             );
-        """,
-        [temp_table_name, temp_url],
+        """,  # noqa: S608
+        [temp_url],
     )
 
     # Retrieve column names from the temporary table
@@ -112,35 +113,50 @@ def transform_results_and_insert_into_staging_table(
     )
 
     # Insert transformed data into the staging table
-    return conn.execute(
-        """
-        INSERT INTO stg_results BY NAME
-            SELECT
-                ?,
-                ? as source_file_id,
-                ? as race_id
-            FROM ?
-        """,
-        [
-            mapped_columns_str,
-            sheet_id,
-            race_id,
-            temp_table_name,
-        ],
-    )
+    try:
+        return conn.execute(
+            f"""
+            INSERT INTO stg_results BY NAME
+                SELECT
+                    {mapped_columns_str},
+                    ? as source_file_id,
+                    ? as race_id
+                FROM "{temp_table_name}";
+            """,  # noqa: S608
+            [
+                sheet_id,
+                race_id,
+            ],
+        )
+    except BinderException as e:
+        print(
+            f"Error inserting data from race {race_id} and sheet {sheet_id}:"
+            f" {mapped_columns_str}",
+        )
+        print(e)
+        return None
 
 
-def main() -> None:
+def main(db_path: str) -> None:
     """Main function to fetch race results from Google Sheets and insert them into
     DuckDB.
     """
     # Get Google credentials from environment variable
-    drive = DriveService(google_service_account_credentials)
+    drive = DriveService(google_service_account_path)
     df_drive_ids = drive.get_gsheets_by_prefix("prep_results")
 
     # Connect to DuckDB database
-    duckdb_con = duckdb.connect("prod.duckdb")
+    conn = duckdb.connect(db_path)
 
+    # install httpfs extension
+    conn.execute("""
+        INSTALL httpfs; LOAD httpfs;
+    """)
+
+    # Create or replace staging table
+    create_or_replace_staging_table(conn)
+
+    # function to write table data from Python thread
     def write_from_thread(sheet_data: dict) -> None:
         """Writes race results from a single sheet into the database in a separate
         thread.
@@ -149,7 +165,7 @@ def main() -> None:
             sheet_data: Dictionary containing Google Sheet metadata.
 
         """
-        local_con = duckdb_con.cursor()
+        local_con = conn.cursor()
         return transform_results_and_insert_into_staging_table(local_con, sheet_data)
 
     with ThreadPoolExecutor() as executor:
@@ -165,6 +181,9 @@ def main() -> None:
                 future.result()  # Ensure task completion
                 pbar.update(1)  # Update progress bar
 
+    return conn
+
 
 if __name__ == "__main__":
-    main()
+    conn = main(db_path=duckdb_path)
+    print(conn.execute("select count(*) from stg_results").df())

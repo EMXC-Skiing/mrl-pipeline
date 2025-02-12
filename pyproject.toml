@@ -22,4 +22,4 @@ fixable = ["ALL"]
 [tool.ruff]
 fix = true
 line-length = 88
-unsafe-fixes = true
+unsafe-fixes = false

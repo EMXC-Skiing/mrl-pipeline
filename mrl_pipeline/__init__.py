@@ -7,4 +7,5 @@ DATA_DIR = ROOT_DIR / "data"
 CONFIG_DIR = ROOT_DIR / "config"
 LOG_DIR = ROOT_DIR / "logs"
 
-google_service_account_credentials = CONFIG_DIR / "service.json"
+google_service_account_path = CONFIG_DIR / "service.json"
+duckdb_path = DB_DIR / "mrl.db"

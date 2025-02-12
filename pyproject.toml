@@ -5,6 +5,9 @@ description = "Calculate MA Nordic points and ranking lists from results."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "dagster>=1.9.13",
+    "dagster-duckdb>=0.25.13",
+    "dagster-webserver>=1.9.13",
     "duckdb>=1.2.0",
     "google>=3.0.0",
     "google-api-python-client>=2.160.0",
@@ -13,6 +16,23 @@ dependencies = [
     "pytz>=2025.1",
     "tqdm>=4.67.1",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "dagster-webserver", 
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.dagster]
+module_name = "mrl_pipeline.definitions"
+code_location_name = "mrl_pipeline"
+
+[tool.setuptools.packages.find]
+exclude=["mrl_pipeline_tests"]
 
 [tool.ruff.lint]
 select = ["ALL"]

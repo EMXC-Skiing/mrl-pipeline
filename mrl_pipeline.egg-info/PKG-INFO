@@ -1,0 +1,25 @@
+Metadata-Version: 2.2
+Name: mrl-pipeline
+Version: 0.1.0
+Summary: Calculate MA Nordic points and ranking lists from results.
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: dagster>=1.9.13
+Requires-Dist: dagster-duckdb>=0.25.13
+Requires-Dist: dagster-webserver>=1.9.13
+Requires-Dist: duckdb>=1.2.0
+Requires-Dist: google>=3.0.0
+Requires-Dist: google-api-python-client>=2.160.0
+Requires-Dist: gspread>=6.1.4
+Requires-Dist: pandas>=2.2.3
+Requires-Dist: pytz>=2025.1
+Requires-Dist: tqdm>=4.67.1
+Provides-Extra: dev
+Requires-Dist: dagster-webserver; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+
+# Mass Ranking List
+
+Data pipeline for ingesting, standardizing, and aggregating results from MA points-eligible racing.
+
+Calculates athlete seeds, race penalties, and race points.

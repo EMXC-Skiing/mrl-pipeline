@@ -1,9 +1,15 @@
-from dagster import Definitions, load_assets_from_modules
+from dagster import Definitions
 
-from mrl_pipeline import assets
+from mrl_pipeline import models
 
-all_assets = load_assets_from_modules([assets])
+model_names = [
+    "infra_result_files",
+    "stg_results",
+]
+
+# Create a dictionary of the imported objects.
+imported_models = [getattr(models, name) for name in model_names]
 
 defs = Definitions(
-    assets=all_assets,
+    assets=[model.build() for model in imported_models],
 )

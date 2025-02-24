@@ -121,15 +121,12 @@ class DriveService:
             .rename(
                 columns={
                     "name": "race_id",
-                    "id": "source_file_id",
+                    "id": "file_id",
                     "modifiedTime": "modified_at",
                 },
             )
+            .assign(
+                source_type="google_sheets",
+            )
             .sort_values(by=["race_id", "modified_at"], ascending=[True, False])
         )
-
-        # note: could filter down to most recent of each result sheet to guarantee
-        # uniqueness by name
-        # BUT would probably rather write a test for this to ensure there
-        # aren't multiple versions of a result sheet floating around
-        # df_files = df_files.groupby('race_id').nth(0).reset_index()

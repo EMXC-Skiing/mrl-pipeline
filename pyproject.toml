@@ -7,6 +7,7 @@ requires-python = ">=3.9"
 dependencies = [
     "dagster>=1.9.13",
     "dagster-duckdb>=0.25.13",
+    "dagster-duckdb-pandas>=0.26.2",
     "dagster-webserver>=1.9.13",
     "duckdb>=1.2.0",
     "google>=3.0.0",
@@ -36,7 +37,7 @@ exclude=["mrl_pipeline_tests"]
 
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = ["D401", "D205"]
+ignore = ["D401", "D205", "FA100", "T201"]
 fixable = ["ALL"]
 
 [tool.ruff]

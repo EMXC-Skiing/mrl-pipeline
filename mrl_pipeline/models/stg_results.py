@@ -1,164 +1,35 @@
 """models.py.
 
-This module defines the base class from which MRL models are instantiated, as well as
-the models themselves.
+This module defines the base class from which MRL models are instantiated.
 
 """
 
-from __future__ import annotations
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from types import ModuleType
+from typing import Union
 
-import duckdb
-from dagster import TableColumn, TableSchema, asset
+from dagster_duckdb import DuckDBResource
 from duckdb import BinderException, DuckDBPyConnection
 from tqdm import tqdm
 
-from mrl_pipeline.data_connectors import DriveService
+from mrl_pipeline.models import PipelineModel
 from mrl_pipeline.utils import (
     duckdb_path,
-    google_service_account_path,
     sanitize_table_name,
 )
 
 
-class PipelineModel:
-    """Base class representing a model within the MRL pipeline.
+def run_stg_results(
+    duckdb_resource: Union[DuckDBResource, ModuleType],
+) -> DuckDBPyConnection:
+    """Connects to a DuckDB database, creates or replaces a staging table,
+    and fetches race results from Google Sheets. The results are then transformed and
+    inserted into the staging table.
 
-    This class encapsulates both metadata and execution logic for a model,
-    enabling it to be integrated as a dagster asset.
-
-    Attributes:
-        name (str): Unique identifier for the model.
-        description (str): Brief summary of the model's purpose.
-        column_descriptions (dict[str, str] | None): Optional mapping of column names to
-            their descriptions.
-        deps (list[str]): List of asset names that this model depends on.
-        runner (callable): Function or callable that performs the model's computations.
+    Returns:
+        DuckDBPyConnection: The DuckDB connection object.
 
     """
-
-    def __init__(
-        self,
-        name: str,
-        description: str,
-        deps: list[str],
-        runner: callable,
-        column_descriptions: dict[str, str] | None = None,
-    ) -> None:
-        """Initialize a PipelineModel instance with its metadata and execution
-            parameters.
-
-        Args:
-            name (str): Unique identifier for the model.
-            description (str): Brief summary of the model's purpose.
-            column_descriptions (dict[str, str] | None): Optional mapping of column
-                names to their descriptions.
-            deps (list[str]): List of asset names that this model depends on.
-            runner (callable): Function or callable that performs the model's
-                computations.
-
-
-        """
-        self.name = name
-        self.description = description
-        self.deps = deps
-        self.runner = runner
-        self.column_descriptions = column_descriptions or {}
-        self.asset_metadata = {
-            "dagster/column_schema": TableSchema(
-                columns=[
-                    TableColumn(name=k, description=v)
-                    for k, v in self.column_descriptions.items()
-                ],
-            ),
-        }
-
-    def run(self, *args, **kwargs):
-        """Execute the model's logic with any provided arguments and keyword arguments.
-
-        Args:
-            *args: Variable length argument list.
-            **kwargs: Arbitrary keyword arguments.
-
-        Returns:
-            Any: The result of the model's computation.
-
-        """
-        return self.runner(*args, **kwargs)
-
-    def build(self):
-        """Create a Dagster asset that wraps the model's execution logic.
-
-        This method uses the Dagster @asset decorator to convert the model's runner
-        function into an asset.
-
-        Returns:
-            Callable: A Dagster asset that executes the model's logic.
-
-        """
-
-        @asset(
-            name=self.name,
-            deps=self.deps,
-            description=self.description,
-            metadata=self.asset_metadata,
-        )
-        def run_model(context):
-            # Run the model with any provided arguments and keyword arguments.
-            return self.runner(context)
-
-        return run_model
-
-
-def run_infra_result_files(context) -> duckdb.DuckDBPyConnection:
-    """Main function to add table of Google Drive ids to DuckDB database."""
-    # Get Google credentials from environment variable
-    drive = DriveService(google_service_account_path)
-
-    # Get Google Drive ids for all Google Sheets with the prefix "prep_results"
-    df_drive_ids = drive.get_gsheets_by_prefix("prep_results")  # noqa: F841
-
-    # Connect to DuckDB database
-    conn = duckdb.connect(duckdb_path)
-
-    # Add the Google Drive IDs to the DuckDB database
-    conn.execute("""
-        CREATE OR REPLACE TABLE infra_result_files (
-                race_id VARCHAR,
-                file_id VARCHAR,
-                modified_at TIMESTAMP,
-                source_type VARCHAR
-        )
-    """)
-    conn.execute("""
-        INSERT INTO infra_result_files SELECT
-                race_id,
-                file_id,
-                modified_at,
-                source_type
-            FROM df_drive_ids
-    """)
-
-    return
-
-
-infra_result_files = PipelineModel(
-    name="infra_result_files",
-    description="File identifiers of prepped result sheets by race id.",
-    deps=[],
-    column_descriptions={
-        "race_id": "Unique race identifier",
-        "file_id": "File identifier",
-        "modified_at": "File last modified timestamp",
-        "source_type": "Type of file source",
-    },
-    runner=run_infra_result_files,
-)
-
-
-def run_stg_results(context) -> DuckDBPyConnection:
-    # Mapping of Google Sheets column names to staging table column names
     column_map = {
         "name_raw": ["Name", "Skier Name"],
         "time_raw": ["Race Time", "Elapsed"],
@@ -258,7 +129,7 @@ def run_stg_results(context) -> DuckDBPyConnection:
     DuckDB.
     """
     # Connect to DuckDB database
-    conn = duckdb.connect(duckdb_path)
+    conn = duckdb_resource.connect(duckdb_path)
 
     # install httpfs extension
     conn.execute("INSTALL httpfs; LOAD httpfs;")
@@ -294,7 +165,7 @@ def run_stg_results(context) -> DuckDBPyConnection:
                 future.result()  # Ensure task completion
                 pbar.update(1)  # Update progress bar
 
-    return
+    return conn
 
 
 stg_results = PipelineModel(

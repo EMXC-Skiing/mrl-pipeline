@@ -1,3 +1,9 @@
+"""utils.py.
+
+This module provides utility functions and constants for the MRL pipeline project. It
+includes paths to various project directories and a function to sanitize table names.
+"""
+
 import pathlib
 import re
 

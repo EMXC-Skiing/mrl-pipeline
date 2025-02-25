@@ -4,10 +4,9 @@ This module uses the Google Sheets API to fetch Google Sheets containing
 prep_results data
 """
 
-from __future__ import annotations
-
 import json
 import os
+from typing import Optional
 
 import pandas as pd
 from google.oauth2.service_account import Credentials
@@ -33,9 +32,9 @@ class DriveService:
 
     def __init__(
         self,
-        service_account_path: str | None = None,
-        servive_account_env_var: str | None = None,
-        scopes: str | None = None,
+        service_account_path: Optional[str] = None,
+        service_account_env_var: Optional[str] = None,
+        scopes: Optional[str] = None,
     ) -> None:
         """Initialize the data connector with the provided authentication."""
         # Set default scopes
@@ -48,9 +47,9 @@ class DriveService:
             credentials = Credentials.from_service_account_file(
                 service_account_path,
             ).with_scopes(self.scopes)
-        elif servive_account_env_var:
+        elif service_account_env_var:
             credentials = Credentials.from_service_account_info(
-                json.loads(os.getenv(servive_account_env_var)),
+                json.loads(os.getenv(service_account_env_var)),
             ).with_scopes(self.scopes)
         else:
             msg = "No service account provided"
@@ -59,7 +58,21 @@ class DriveService:
         # Build the Drive service
         self.service = build("drive", "v3", credentials=credentials)
 
-    def get_most_recent_gsheet_by_name(self, sheet_name: str):
+    def get_most_recent_gsheet_by_name(
+        self,
+        sheet_name: str,
+    ) -> Optional[dict[str, str]]:
+        """Retrieves the most recent Google Sheet file id by its name.
+
+        Args:
+            sheet_name (str): The name of the Google Sheet to search for.
+
+        Returns:
+            string or None: A dictionary containing the drive ID and name of the most
+            recent Google Sheet matching the specified name, or None if no such file is
+            found.
+
+        """
         # Define the query to filter for Google Sheets
         gsheets_query = (
             "mimeType='application/vnd.google-apps.spreadsheet' "
@@ -85,7 +98,23 @@ class DriveService:
             return files[0]
         return None
 
-    def get_gsheets_by_prefix(self, prefix: str | None = None):
+    def get_gsheets_by_prefix(self, prefix: Optional[str] = None) -> pd.DataFrame:
+        """Retrieve Google Sheets files from Google Drive that match a given prefix.
+
+        This method queries Google Drive for Google Sheets whose names contain the
+        specified prefix. It returns a pandas DataFrame containing the file
+        names, IDs, and modification times, filtered and sorted by the prefix.
+
+        Args:
+            prefix (Optional[str]): The prefix to filter file names. If None,
+                        defaults to "prep_results".
+
+        Returns:
+            pd.DataFrame: A DataFrame with columns 'race_id', 'file_id',
+                  'modified_at', and 'source_type', containing the
+                  filtered and sorted list of Google Sheets files.
+
+        """
         files = []
         page_token = None
         self.prefix = "prep_results" if prefix is None else prefix

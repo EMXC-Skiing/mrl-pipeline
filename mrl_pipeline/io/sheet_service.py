@@ -3,8 +3,9 @@ from datetime import datetime
 import pytz
 from gspread.exceptions import WorksheetNotFound
 
-from .resilient_gspread_client import ResilientGspreadClient
-from .schema_gsheet import SchemaGSheet
+from mrl_pipeline import CONFIG_PATH
+from mrl_pipeline.resilient_gspread_client import ResilientGspreadClient
+from mrl_pipeline.schema_gsheet import SchemaGSheet
 
 
 def _return_timestamp():
@@ -154,15 +155,12 @@ class SheetService:
                        e.g., folder_id, retry parameters, etc.
         """
         self.env = env
-        self.warehouse_folder_ids = (
-            {
-                "prod": "1BCwlHqa5nS5CoZ4Lg9eO8iJBuYvyTEKu",
-                "dev": "1WiXIc8a5aYfffxZGGaxoEHxVUlGAkcwg",
-                "stg": "1bSslUYoXzwE7PGnjqQLbAH50ZYWCLdZ4",
-            }
-            if warehouse_folder_ids is None
-            else warehouse_folder_ids
-        )
+
+        if warehouse_folder_ids is None:
+            with open(CONFIG_PATH / "drive_environments.json", "r") as f:
+                self.warehouse_folder_ids = json.load(f)
+        else:
+            self.warehouse_folder_ids = warehouse_folder_ids
 
         scope = [
             "https://spreadsheets.google.com/feeds",

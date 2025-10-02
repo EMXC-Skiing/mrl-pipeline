@@ -22,7 +22,6 @@ dependencies = [
     "pytest",
     "dagster-webserver",
     "grpcio==1.66.1"
-   
 ]
 
 [build-system]

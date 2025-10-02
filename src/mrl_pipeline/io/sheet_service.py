@@ -3,7 +3,7 @@ from datetime import datetime
 import pytz
 from gspread.exceptions import WorksheetNotFound
 
-from mrl_pipeline import CONFIG_PATH
+from mrl_pipeline.utils import google_drive_environments_path
 from mrl_pipeline.io.resilient_gspread_client import ResilientGspreadClient
 from mrl_pipeline.io.schema_gsheet import SchemaGSheet
 
@@ -157,7 +157,7 @@ class SheetService:
         self.env = env
 
         if warehouse_folder_ids is None:
-            with open(CONFIG_PATH / "drive_environments.json", "r") as f:
+            with open(google_drive_environments_path, "r") as f:
                 self.warehouse_folder_ids = json.load(f)
         else:
             self.warehouse_folder_ids = warehouse_folder_ids

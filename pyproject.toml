@@ -36,3 +36,10 @@ packages = ["src/mrl_pipeline"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/mrl_pipeline"]
+
+[tool.ruff]
+line-length = 88
+unsafe-fixes = true
+
+[tool.ruff.lint]
+extend-select = ["I", "F", "E"]

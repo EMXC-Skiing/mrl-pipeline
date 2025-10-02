@@ -1,11 +1,15 @@
+import json
 from datetime import datetime
 
+import gspread
 import pytz
+from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
+from pandas import DataFrame
 
-from mrl_pipeline.utils import google_drive_environments_path
 from mrl_pipeline.io.resilient_gspread_client import ResilientGspreadClient
 from mrl_pipeline.io.schema_gsheet import SchemaGSheet
+from mrl_pipeline.utils import google_drive_environments_path
 
 
 def _return_timestamp():
@@ -130,19 +134,13 @@ class TableVersionManager:
                     self.gc.del_spreadsheet(previous_sheet.id)
 
 
-import json
-
-import gspread
-from google.oauth2.service_account import Credentials
-from pandas import DataFrame
-
-
 class SheetService:
     def __init__(
         self,
         auth_credentials: str,
         env: str = "prod",
-        warehouse_folder_ids: str = None,
+        warehouse_folder_ids: dict = None,
+        path_to_warehouse_folder_ids: str = None,
         **kwargs,
     ):
         """Initializes the high-level data interface, setting up the environment
@@ -156,11 +154,11 @@ class SheetService:
         """
         self.env = env
 
-        if warehouse_folder_ids is None:
-            with open(google_drive_environments_path, "r") as f:
-                self.warehouse_folder_ids = json.load(f)
-        else:
-            self.warehouse_folder_ids = warehouse_folder_ids
+        if path_to_warehouse_folder_ids is None:
+            path_to_warehouse_folder_ids = google_drive_environments_path
+
+        with open(path_to_warehouse_folder_ids, "r") as f:
+            self.warehouse_folder_ids = json.load(f)
 
         scope = [
             "https://spreadsheets.google.com/feeds",
@@ -173,7 +171,10 @@ class SheetService:
         base_gc = gspread.authorize(creds)
         self.gc = ResilientGspreadClient(base_gc)
         self.version_manager = TableVersionManager(
-            self.gc, env_folder_ids=self.warehouse_folder_ids, env=self.env, **kwargs,
+            self.gc,
+            env_folder_ids=self.warehouse_folder_ids,
+            env=self.env,
+            **kwargs,
         )
 
     def put_warehouse_table(self, table_name: str, data, lifecycle_management=True):
@@ -186,7 +187,8 @@ class SheetService:
         """
         # Create a temporary sheet for the provided table name
         sh = self.version_manager.create_table(
-            table_name, lifecycle_management=lifecycle_management,
+            table_name,
+            lifecycle_management=lifecycle_management,
         )
 
         try:
@@ -234,7 +236,10 @@ class SheetService:
         self.version_manager.promote_temp_tables(archive_previous=archive_previous)
 
     def get_prep_table(
-        self, sheet_name, worksheet_name: str = None, return_url: bool = False,
+        self,
+        sheet_name,
+        worksheet_name: str = None,
+        return_url: bool = False,
     ):
         """Retrieves a worksheet from a specified sheet as a DataFrame. If
         `worksheet_name` is provided, get_warehouse_table will try to interpret it as an

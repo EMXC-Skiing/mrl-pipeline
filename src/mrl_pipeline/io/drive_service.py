@@ -2,20 +2,13 @@
 Sheets containing prep_results data
 """
 
-
+import json
+import os
 from typing import Dict, List, Optional
 
 import pandas as pd
-
-import json
-import os
-
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-
-
-
-
 
 
 class DriveService:
@@ -65,9 +58,12 @@ class DriveService:
         # Build the Drive service
         self.service = build("drive", "v3", credentials=credentials)
 
-
     def _list_files(
-        self, q: str, drive_params: dict, fields: str, page_size: int = 1000,
+        self,
+        q: str,
+        drive_params: dict,
+        fields: str,
+        page_size: int = 1000,
     ) -> List[Dict]:
         files, page_token = [], None
         while True:
@@ -91,7 +87,9 @@ class DriveService:
         return files
 
     def _traverse_folder_tree(
-        self, root_folder_id: str, drive_params: dict,
+        self,
+        root_folder_id: str,
+        drive_params: dict,
     ) -> List[str]:
         """Breadth-first traversal to collect all descendant folder IDs starting at
         root.
@@ -120,7 +118,7 @@ class DriveService:
         """Retrieve Google Sheets whose names match a prefix, optionally restricted to a
         shared drive
         and/or a folder (with optional recursive traversal).
-    
+
 
         Args:
             prefix: Name prefix to filter (defaults to "prep_results"). shared_drive_id:

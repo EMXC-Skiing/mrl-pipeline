@@ -7,7 +7,19 @@ authors = [
     { name = "Chris Stock", email = "chris.stock@emxc.org" }
 ]
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "pandas",
+    "typing",
+    "dagster",
+    "dagster-duckdb",
+    "duckdb",
+    "pytz",
+    "tqdm",
+    "gspread",
+    "gspread-dataframe",
+    "google-api-python-client",
+    "google-auth",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -18,3 +30,6 @@ Homepage = "https://massnordic.org"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mrl_pipeline"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mrl_pipeline"]

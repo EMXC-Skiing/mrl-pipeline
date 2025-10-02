@@ -7,7 +7,7 @@ import duckdb
 from dagster_duckdb import DuckDBResource
 from duckdb import DuckDBPyConnection
 
-from mrl_pipeline.data_connectors import DriveService
+from mrl_pipeline.io.data_connectors import DriveService
 from mrl_pipeline.models import PipelineModel
 from mrl_pipeline.utils import (
     duckdb_path,

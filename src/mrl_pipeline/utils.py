@@ -8,13 +8,14 @@ import pathlib
 import re
 
 # Paths to project directories
-ROOT_DIR = pathlib.Path(__file__).parent.parent
+ROOT_DIR = pathlib.Path(__file__).parent.parent.parent
 DB_DIR = ROOT_DIR / "db"
 DATA_DIR = ROOT_DIR / "data"
 CONFIG_DIR = ROOT_DIR / "config"
 LOG_DIR = ROOT_DIR / "logs"
 
 google_service_account_path = CONFIG_DIR / "service.json"
+google_drive_environments_path = CONFIG_DIR / "google_drive_environments.json"
 duckdb_path = DB_DIR / "mrl.duckdb"
 
 

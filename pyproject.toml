@@ -1,15 +1,37 @@
 [project]
 name = "mrl-pipeline"
 version = "0.1.0"
-description = "Calculate MA Nordic points and ranking lists from results."
+description = "Data pipeline for ingesting, standardizing, and aggregating results from MA points-eligible racing."
 readme = "README.md"
+authors = [
+    { name = "Chris Stock", email = "chris.stock@emxc.org" }
+]
 requires-python = ">=3.9"
 dependencies = [
-    "duckdb>=1.2.0",
-    "google>=3.0.0",
-    "google-api-python-client>=2.160.0",
-    "gspread>=6.1.4",
-    "pandas>=2.2.3",
-    "pytz>=2025.1",
-    "tqdm>=4.67.1",
+    "pandas",
+    "typing",
+    "dagster",
+    "dagster-duckdb",
+    "duckdb",
+    "pytz",
+    "tqdm",
+    "gspread",
+    "gspread-dataframe",
+    "google-api-python-client",
+    "google-auth",
+    "pytest",
+    "dagster-webserver"
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.urls]
+Homepage = "https://massnordic.org"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mrl_pipeline"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mrl_pipeline"]

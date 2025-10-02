@@ -1,6 +1,5 @@
 # project
 config/
-db/
 service.json
 
 # Environments
@@ -42,6 +41,8 @@ share/python-wheels/
 MANIFEST
 
 # database
+data/
+db/
 *.duckdb
 
 # VSCode

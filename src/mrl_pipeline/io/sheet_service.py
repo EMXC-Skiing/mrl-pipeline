@@ -4,8 +4,8 @@ import pytz
 from gspread.exceptions import WorksheetNotFound
 
 from mrl_pipeline import CONFIG_PATH
-from mrl_pipeline.resilient_gspread_client import ResilientGspreadClient
-from mrl_pipeline.schema_gsheet import SchemaGSheet
+from mrl_pipeline.io.resilient_gspread_client import ResilientGspreadClient
+from mrl_pipeline.io.schema_gsheet import SchemaGSheet
 
 
 def _return_timestamp():

@@ -15,3 +15,6 @@ build-backend = "hatchling.build"
 
 [project.urls]
 Homepage = "https://massnordic.org"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mrl_pipeline"]

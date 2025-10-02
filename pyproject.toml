@@ -20,7 +20,9 @@ dependencies = [
     "google-api-python-client",
     "google-auth",
     "pytest",
-    "dagster-webserver"
+    "dagster-webserver",
+    "grpcio==1.66.1"
+   
 ]
 
 [build-system]

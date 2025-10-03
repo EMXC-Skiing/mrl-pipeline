@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from typing import Optional
 
 import gspread
 import pytz
@@ -9,7 +10,7 @@ from pandas import DataFrame
 
 from mrl_pipeline.io.resilient_gspread_client import ResilientGspreadClient
 from mrl_pipeline.io.schema_gsheet import SchemaGSheet
-from mrl_pipeline.utils import google_drive_environments_path
+from mrl_pipeline.utils import fetch_environ
 
 
 def _return_timestamp():
@@ -137,10 +138,9 @@ class TableVersionManager:
 class SheetService:
     def __init__(
         self,
-        auth_credentials: str,
+        auth_credentials: Optional[str] = None,
         env: str = "prod",
-        warehouse_folder_ids: dict = None,
-        path_to_warehouse_folder_ids: str = None,
+        warehouse_folder_id_env_var: str = "MNP_GOOGLE_DRIVE_WAREHOUSE_FOLDER_IDS",
         **kwargs,
     ):
         """Initializes the high-level data interface, setting up the environment
@@ -154,20 +154,24 @@ class SheetService:
         """
         self.env = env
 
-        if path_to_warehouse_folder_ids is None:
-            path_to_warehouse_folder_ids = google_drive_environments_path
-
-        with open(path_to_warehouse_folder_ids, "r") as f:
-            self.warehouse_folder_ids = json.load(f)
+        self.warehouse_folder_ids = fetch_environ(warehouse_folder_id_env_var)
 
         scope = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
             "https://www.googleapis.com/auth/spreadsheets",
         ]
-        creds = Credentials.from_service_account_info(
-            json.loads(auth_credentials),
-        ).with_scopes(scope)
+        raw_credentials = (
+            auth_credentials
+            if auth_credentials is not None
+            else fetch_environ("GOOGLE_SERVICE_ACCOUNT_CREDENTIALS")
+        )
+        if isinstance(raw_credentials, dict):
+            creds_info = raw_credentials
+        else:
+            creds_info = json.loads(raw_credentials)
+
+        creds = Credentials.from_service_account_info(creds_info).with_scopes(scope)
         base_gc = gspread.authorize(creds)
         self.gc = ResilientGspreadClient(base_gc)
         self.version_manager = TableVersionManager(

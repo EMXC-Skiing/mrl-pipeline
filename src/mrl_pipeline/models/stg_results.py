@@ -6,21 +6,20 @@ This module defines the base class from which MRL models are instantiated.
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import ModuleType
-from typing import Union
 
-from dagster_duckdb import DuckDBResource
+import duckdb
 from duckdb import BinderException, DuckDBPyConnection
 from tqdm import tqdm
 
 from mrl_pipeline.models import PipelineModel
 from mrl_pipeline.utils import (
-    duckdb_path,
+    duckdb_path,  # TODO: pull from environment variable
     sanitize_table_name,
 )
 
 
 def run_stg_results(
-    duckdb_resource: Union[DuckDBResource, ModuleType],
+    duckdb_module: ModuleType = duckdb,
 ) -> DuckDBPyConnection:
     """Connects to a DuckDB database, creates or replaces a staging table,
     and fetches race results from Google Sheets. The results are then transformed and
@@ -129,7 +128,7 @@ def run_stg_results(
     DuckDB.
     """
     # Connect to DuckDB database
-    conn = duckdb_resource.connect(duckdb_path)
+    conn = duckdb_module.connect(duckdb_path)
 
     # install httpfs extension
     conn.execute("INSTALL httpfs; LOAD httpfs;")

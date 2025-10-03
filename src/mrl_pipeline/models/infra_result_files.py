@@ -1,32 +1,27 @@
 """infra_result_files.py."""
 
 from types import ModuleType
-from typing import Union
 
 import duckdb
-from dagster_duckdb import DuckDBResource
 from duckdb import DuckDBPyConnection
 
 from mrl_pipeline.io.drive_service import DriveService
 from mrl_pipeline.models import PipelineModel
-from mrl_pipeline.utils import (
-    duckdb_path,
-    google_service_account_path,
-)
+from mrl_pipeline.utils import duckdb_path
 
 
 def run_infra_result_files(
-    duckdb_resource: Union[DuckDBResource, ModuleType],
+    duckdb_module: ModuleType = duckdb,
 ) -> DuckDBPyConnection:
     """Main function to add table of Google Drive ids to DuckDB database."""
     # Get Google credentials from environment variable
-    drive = DriveService(google_service_account_path)
+    drive = DriveService()
 
     # Get Google Drive ids for all Google Sheets with the prefix "prep_results"
     df_drive_ids = drive.get_gsheets_by_prefix("prep_results")  # noqa: F841
 
     # Connect to DuckDB database
-    conn = duckdb.connect(duckdb_path)
+    conn = duckdb_module.connect(duckdb_path)
 
     # Add the Google Drive IDs to the DuckDB database
     conn.execute("""

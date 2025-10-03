@@ -2,26 +2,50 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Set
+import importlib
+import pkgutil
+from typing import Dict, List, Optional, Sequence, Set
 
 import networkx as nx
 
-from mrl_pipeline import models as model_module
+from mrl_pipeline import models as models_pkg
 from mrl_pipeline.models.pipeline_model import PipelineModel
 
-# Default ordering mirrors the historical asset list so behavior remains
-# consistent for callers that rely on import-time ordering.
-DEFAULT_MODEL_NAMES: List[str] = [
-    "infra_result_files",
-    "stg_results",
-]
+
+def _discover_models() -> Dict[str, PipelineModel]:
+    """Import modules under ``mrl_pipeline.models`` and collect PipelineModel
+    objects."""
+
+    discovered: Dict[str, PipelineModel] = {}
+
+    for info in pkgutil.iter_modules(models_pkg.__path__):
+        module_name = info.name
+        if info.ispkg or module_name.startswith("_") or module_name == "pipeline_model":
+            continue
+
+        module = importlib.import_module(f"{models_pkg.__name__}.{module_name}")
+
+        for attr in vars(module).values():
+            if isinstance(attr, PipelineModel):
+                discovered[attr.name] = attr
+
+    return dict(sorted(discovered.items(), key=lambda item: item[0]))
+
+
+ALL_MODELS_BY_NAME = _discover_models()
 
 
 def load_models(names: Optional[Sequence[str]] = None) -> List[PipelineModel]:
-    """Load pipeline models by name from the models package."""
+    """Load pipeline models, optionally restricting to a list of names."""
 
-    name_list = list(names) if names is not None else DEFAULT_MODEL_NAMES
-    return [getattr(model_module, name) for name in name_list]
+    if names is None:
+        return list(ALL_MODELS_BY_NAME.values())
+
+    missing = [name for name in names if name not in ALL_MODELS_BY_NAME]
+    if missing:
+        raise ValueError(f"Unknown model(s): {', '.join(missing)}")
+
+    return [ALL_MODELS_BY_NAME[name] for name in names]
 
 
 class ModelSelector:
@@ -32,8 +56,7 @@ class ModelSelector:
         select: Optional[str] = None,
         models: Optional[Sequence[PipelineModel]] = None,
     ) -> None:
-        loaded_models = list(models) if models is not None else load_models()
-        self.models = loaded_models
+        self.models = list(models) if models is not None else load_models()
         self.select = select
 
         # cache by name for fast lookup and consistent deterministic order
@@ -121,3 +144,6 @@ class ModelSelector:
                 key=lambda name: self.import_order_index[name],
             ),
         )
+
+
+__all__ = ["ModelSelector", "load_models", "ALL_MODELS_BY_NAME"]

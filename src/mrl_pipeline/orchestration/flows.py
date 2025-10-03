@@ -5,7 +5,7 @@ from typing import Dict, Optional
 from prefect import flow
 from prefect.futures import PrefectFuture
 
-from mrl_pipeline.models.model_selector import ModelSelector, load_models
+from mrl_pipeline.orchestration import ModelSelector, load_models
 
 imported_models = load_models()
 model_tasks = {model.name: model.build() for model in imported_models}

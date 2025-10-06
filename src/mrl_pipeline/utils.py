@@ -28,7 +28,8 @@ def sanitize_table_name(name: str) -> str:
         str: The sanitized table name.
 
     """
-    return re.sub(r"[^a-zA-Z0-9_+]", "", name)  # Remove invalid characters
+    stripped = re.sub(r"[^a-zA-Z0-9_+]", "", name)  # Remove invalid characters
+    return stripped.lower()  # Convert to lowercase
 
 
 def fetch_environ(name: str) -> str:
@@ -57,12 +58,12 @@ def fetch_environ(name: str) -> str:
             value = value.decode()
 
         try:
-            return json.loads(value)
+            return json.loads(str(value))
         except (TypeError, json.JSONDecodeError):
             return value
 
     value = os.getenv(name)
-    if value:
+    if name in os.environ:
         return _decode_json(value)
 
     fallback = globals().get(name)

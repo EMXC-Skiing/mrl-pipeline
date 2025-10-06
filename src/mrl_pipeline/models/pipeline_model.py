@@ -6,9 +6,13 @@ This module defines the base class from which MRL models are instantiated.
 
 from typing import Any, Callable, Optional
 
-import duckdb
 from duckdb import DuckDBPyConnection
 from prefect import get_run_logger, task
+
+from mrl_pipeline.io.database_connectors import (
+    DatabaseConnector,
+    LocalDuckDBConnector,
+)
 
 
 class PipelineModel:
@@ -34,6 +38,7 @@ class PipelineModel:
         deps: list[str],
         runner: Callable,
         column_descriptions: Optional[dict[str, str]] = None,
+        connector: Optional[DatabaseConnector] = None,
     ) -> None:
         """Initialize a PipelineModel instance with its metadata and execution
             parameters.
@@ -53,12 +58,13 @@ class PipelineModel:
         self.deps = deps
         self.runner = runner
         self.column_descriptions = column_descriptions or {}
+        self.connector = connector or LocalDuckDBConnector()
 
     def run(self, *runner_args: Any, **runner_kwargs: Any) -> dict[str, Any]:
         """Execute the model and return serializable metadata about the run."""
 
         kwargs = dict(runner_kwargs)
-        kwargs.setdefault("duckdb_module", duckdb)
+        kwargs.setdefault("connector", self.connector)
 
         conn = self.runner(*runner_args, **kwargs)
 

@@ -1,42 +1,21 @@
 import json
-from datetime import datetime
 from typing import Optional
 
 import gspread
-import pytz
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
 from pandas import DataFrame
 
-from mrl_pipeline.io.resilient_gspread_client import ResilientGspreadClient
-from mrl_pipeline.io.schema_gsheet import SchemaGSheet
+from mrl_pipeline.io.google_sheets_warehouse_manager.resilient_gspread_client import (
+    ResilientGspreadClient,
+)
+from mrl_pipeline.io.google_sheets_warehouse_manager.schema_gsheet import SchemaGSheet
+from mrl_pipeline.io.warehouse_service import (
+    TableVersionRef,
+    WarehouseService,
+    _default_timestamp,
+)
 from mrl_pipeline.utils import fetch_environ
-
-
-def _return_timestamp():
-    eastern = pytz.timezone("America/New_York")
-    return datetime.now(eastern).strftime("%y-%m-%d_%H:%M")
-
-
-class TableVersionRef:
-    def __init__(self, table_name, env="prod", timestamp=None):
-        """:param table_name: The base name of the table.
-        :param env: The target environment.
-        :param timestamp: Optional timestamp for versioning archived tables.
-        """
-        self.table_name = table_name
-        self.env = env
-        self.tstamp = timestamp or _return_timestamp()
-        self.env_suffix = "" if self.env == "prod" else f"_{env}"
-
-        self._dict = {
-            "primary": f"{self.table_name}{self.env_suffix}",
-            "temp": f"__{self.table_name}_TEMP{self.env_suffix}",
-            "archive": f"_{self.table_name}{self.env_suffix}_{self.tstamp}",
-        }
-
-    def __getitem__(self, key):
-        return self._dict.get(key, None)
 
 
 class TableVersionManager:
@@ -52,7 +31,7 @@ class TableVersionManager:
         self.gc = gclient
         self.env_folder_ids = env_folder_ids
         self.env = env
-        self.timestamp = timestamp or _return_timestamp()
+        self.timestamp = timestamp or _default_timestamp()
         self.temp_tables = {}
 
     def create_table(self, table_name, lifecycle_management=True):
@@ -135,25 +114,17 @@ class TableVersionManager:
                     self.gc.del_spreadsheet(previous_sheet.id)
 
 
-class SheetService:
+class SheetService(WarehouseService):
     def __init__(
         self,
+        env: str,
         auth_credentials: Optional[str] = None,
-        env: str = "prod",
         warehouse_folder_id_env_var: str = "MNP_GOOGLE_DRIVE_WAREHOUSE_FOLDER_IDS",
         **kwargs,
     ):
-        """Initializes the high-level data interface, setting up the environment
-        and client and initializing necessary managers.
+        super().__init__(env=env, auth_credentials=auth_credentials, **kwargs)
 
-        :param client: The base authenticated gspread client
-        :param env: Environment, e.g., 'prod' or 'dev', to control behavior like sheet
-        naming.
-        :param kwargs: Additional arguments passed for specific configuration,
-                       e.g., folder_id, retry parameters, etc.
-        """
         self.env = env
-
         self.warehouse_folder_ids = fetch_environ(warehouse_folder_id_env_var)
 
         scope = [
@@ -166,10 +137,11 @@ class SheetService:
             if auth_credentials is not None
             else fetch_environ("GOOGLE_SERVICE_ACCOUNT_CREDENTIALS")
         )
-        if isinstance(raw_credentials, dict):
-            creds_info = raw_credentials
-        else:
-            creds_info = json.loads(raw_credentials)
+        creds_info = (
+            raw_credentials
+            if isinstance(raw_credentials, dict)
+            else json.loads(raw_credentials)
+        )
 
         creds = Credentials.from_service_account_info(creds_info).with_scopes(scope)
         base_gc = gspread.authorize(creds)

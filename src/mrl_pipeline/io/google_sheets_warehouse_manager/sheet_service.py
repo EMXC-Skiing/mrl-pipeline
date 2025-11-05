@@ -1,4 +1,6 @@
 import json
+import os
+from pathlib import Path
 from typing import Optional
 
 import gspread
@@ -15,7 +17,7 @@ from mrl_pipeline.io.warehouse_service import (
     WarehouseService,
     _default_timestamp,
 )
-from mrl_pipeline.utils import fetch_environ
+from mrl_pipeline.settings import settings
 
 
 class TableVersionManager:
@@ -125,23 +127,49 @@ class SheetService(WarehouseService):
         super().__init__(env=env, auth_credentials=auth_credentials, **kwargs)
 
         self.env = env
-        self.warehouse_folder_ids = fetch_environ(warehouse_folder_id_env_var)
+        attr_name = warehouse_folder_id_env_var.lower()
+        folder_ids = getattr(settings, attr_name, None)
+        if folder_ids is None:
+            raw_folder_ids = os.getenv(warehouse_folder_id_env_var)
+            if raw_folder_ids is not None:
+                try:
+                    folder_ids = json.loads(raw_folder_ids)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        "Expected JSON mapping for Google Drive warehouse folder IDs.",
+                    ) from exc
+        if folder_ids is None:
+            raise RuntimeError(
+                f"Missing configuration value for '{warehouse_folder_id_env_var}'.",
+            )
+        self.warehouse_folder_ids = folder_ids
 
         scope = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
             "https://www.googleapis.com/auth/spreadsheets",
         ]
-        raw_credentials = (
-            auth_credentials
-            if auth_credentials is not None
-            else fetch_environ("GOOGLE_SERVICE_ACCOUNT_CREDENTIALS")
-        )
-        creds_info = (
-            raw_credentials
-            if isinstance(raw_credentials, dict)
-            else json.loads(raw_credentials)
-        )
+        raw_credentials = auth_credentials
+        if raw_credentials is None:
+            raw_credentials = settings.google_service_account_credentials
+            if raw_credentials is None:
+                raw_credentials = os.getenv("GOOGLE_SERVICE_ACCOUNT_CREDENTIALS")
+            if raw_credentials is None:
+                raise RuntimeError(
+                    "Missing configuration value for 'GOOGLE_SERVICE_ACCOUNT_CREDENTIALS'.",
+                )
+        if isinstance(raw_credentials, dict):
+            creds_info = raw_credentials
+        else:
+            creds_source = raw_credentials
+            if isinstance(creds_source, Path):
+                creds_source = creds_source.read_text()
+            try:
+                creds_info = json.loads(str(creds_source))
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "Expected JSON payload for Google service account credentials.",
+                ) from exc
 
         creds = Credentials.from_service_account_info(creds_info).with_scopes(scope)
         base_gc = gspread.authorize(creds)

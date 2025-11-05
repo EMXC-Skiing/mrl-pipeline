@@ -20,7 +20,8 @@ dependencies = [
     "google-api-python-client",
     "google-auth",
     "pytest",
-    "grpcio==1.66.1"
+    "grpcio==1.66.1",
+    "pydantic_settings"
 ]
 
 [build-system]

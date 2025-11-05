@@ -21,7 +21,7 @@ from mrl_pipeline.io.warehouse_service import (
     WarehouseService,
     _default_timestamp,
 )
-from mrl_pipeline.utils import duckdb_path, sanitize_table_name
+from mrl_pipeline.utils import sanitize_table_name
 
 
 class DuckDBWarehouseService(WarehouseService):
@@ -206,7 +206,7 @@ class DuckDBWarehouseService(WarehouseService):
         if md_name or md_token:
             return MotherDuckConnector(database_name=md_name, token=md_token)
 
-        return LocalDuckDBConnector(self._default_database_path(self.env))
+        return LocalDuckDBConnector()
 
     def _extract_database_path(
         self,

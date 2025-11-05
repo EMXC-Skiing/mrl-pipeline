@@ -1,6 +1,7 @@
 """Google Drive helper wrapping credential loading and file discovery."""
 
 import json
+import os
 import pathlib
 from typing import Dict, List, Optional, Sequence, Union
 
@@ -8,7 +9,7 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-from mrl_pipeline.utils import fetch_environ
+from mrl_pipeline.settings import settings
 
 
 class DriveService:
@@ -42,11 +43,16 @@ class DriveService:
 
         self.scopes = scopes
 
-        raw_credentials = (
-            service_account
-            if service_account is not None
-            else fetch_environ(service_account_env_var)
-        )
+        raw_credentials = service_account
+        if raw_credentials is None:
+            attr_name = service_account_env_var.lower()
+            raw_credentials = getattr(settings, attr_name, None)
+            if raw_credentials is None:
+                raw_credentials = os.getenv(service_account_env_var)
+            if raw_credentials is None:
+                raise RuntimeError(
+                    f"Missing configuration value for '{service_account_env_var}'.",
+                )
 
         credentials = self._build_credentials(raw_credentials)
         credentials = credentials.with_scopes(self.scopes)

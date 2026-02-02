@@ -13,14 +13,13 @@ from pandas import DataFrame
 
 from mrl_pipeline.io.database_connectors import (
     DatabaseConnector,
-    LocalDuckDBConnector,
-    MotherDuckConnector,
 )
 from mrl_pipeline.io.warehouse_service import (
     TableVersionRef,
     WarehouseService,
     _default_timestamp,
 )
+from mrl_pipeline.settings import settings
 from mrl_pipeline.utils import sanitize_table_name
 
 
@@ -31,10 +30,13 @@ class DuckDBWarehouseService(WarehouseService):
         self,
         *,
         auth_credentials: Optional[Any] = None,
-        env: Optional[str] = "prod",
+        env_name: Optional[str],
+        local_duckdb_path: Optional[str],
+        schema_name: Optional[str],
+        table_suffix: Optional[str],
         connector: Optional[DatabaseConnector] = None,
         database_path: Optional[Union[str, Path]] = None,
-        schema: str = "main",
+        schema: str,
         timestamp: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
@@ -44,19 +46,9 @@ class DuckDBWarehouseService(WarehouseService):
         schema_token = sanitize_table_name(schema) if schema else ""
         self.schema = schema_token or "main"
         self.env_token = sanitize_table_name(self.env)
-        self.env_suffix = (
-            ""
-            if self.env.lower() == "prod"
-            else f"_{self.env_token or self.env.lower()}"
-        )
+        self.env_suffix = settings.db_table_suffix
         self.timestamp = timestamp or extra_timestamp or _default_timestamp()
-
-        self.connector = self._resolve_connector(
-            connector=connector,
-            auth_credentials=auth_credentials,
-            database_path=database_path,
-            extra_options=self.extra_options,
-        )
+        self.connector = connector
         self.temp_tables: Dict[str, TableVersionRef] = {}
         self._temp_lock = threading.RLock()
         self._location = self._resolve_location()
@@ -173,41 +165,6 @@ class DuckDBWarehouseService(WarehouseService):
             "DuckDBWarehouseService does not support iterating prep tables.",
         )
 
-    def _resolve_connector(
-        self,
-        *,
-        connector: Optional[DatabaseConnector],
-        auth_credentials: Optional[Any],
-        database_path: Optional[Union[str, Path]],
-        extra_options: Mapping[str, Any],
-    ) -> DatabaseConnector:
-        if connector is not None:
-            return connector
-
-        if isinstance(auth_credentials, DatabaseConnector):
-            return auth_credentials
-
-        db_path = self._extract_database_path(
-            auth_credentials=auth_credentials,
-            database_path=database_path,
-            extra_options=extra_options,
-        )
-        if db_path is not None:
-            return LocalDuckDBConnector(db_path)
-
-        if isinstance(auth_credentials, Mapping):
-            md_name = auth_credentials.get("database_name")
-            md_token = auth_credentials.get("token")
-            if md_name or md_token:
-                return MotherDuckConnector(database_name=md_name, token=md_token)
-
-        md_name = extra_options.get("database_name")
-        md_token = extra_options.get("token")
-        if md_name or md_token:
-            return MotherDuckConnector(database_name=md_name, token=md_token)
-
-        return LocalDuckDBConnector()
-
     def _extract_database_path(
         self,
         *,
@@ -240,13 +197,6 @@ class DuckDBWarehouseService(WarehouseService):
                 return Path(candidate)
 
         return None
-
-    def _default_database_path(self, env: str) -> Path:
-        base = Path(duckdb_path)
-        if env.lower() != "prod":
-            token = sanitize_table_name(env) or env.lower()
-            return base.with_name(f"{base.stem}_{token}{base.suffix}")
-        return base
 
     def _resolve_location(self) -> str:
         if hasattr(self.connector, "database_path"):

@@ -15,12 +15,13 @@ class WarehouseService(ABC):
     def __init__(
         self,
         *,
-        env: str,
+        env_name: str,
         auth_credentials: Optional[Any] = None,
         **kwargs: Any,
     ) -> None:
         self.auth_credentials = auth_credentials
         self.extra_options: Dict[str, Any] = dict(kwargs)
+        self.env_name = env_name
 
     @abstractmethod
     def put_warehouse_table(

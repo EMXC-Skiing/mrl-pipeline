@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import json
 import uuid
 from dataclasses import dataclass
@@ -370,14 +371,23 @@ class SheetTask:
     gviz_csv_url: str
 
 
+def _reset_duckdb_file(db_path: str) -> None:
+    try:
+        os.remove(db_path)
+    except FileNotFoundError:
+        pass
+
+
 def _init_duckdb_file(db_path: str) -> None:
     """
     Initialize a DuckDB database file and ensure httpfs is installed and loadable.
+    Turn OFF DuckDB's auto-loading of httpfs as this causes race conditions when multi-threaded.
     """
     con = duckdb.connect(db_path)
     try:
         con.execute("INSTALL httpfs;")
         con.execute("LOAD httpfs;")
+        con.execute("SET duckdb_allow_extension_autoload=false")
     finally:
         con.close()
 
@@ -392,9 +402,9 @@ def process_one_sheet_into_duckdb(
       (ok, standardized_table_name)
     """
     con = duckdb.connect(db_path)
-    try:
-        # con.execute("LOAD httpfs;")
+    con.execute("SET duckdb_allow_extension_autoload=false")
 
+    try:
         suffix = uuid.uuid4().hex[:12]
         raw_table = f"raw_{suffix}"
         std_table = f"std_{suffix}"
@@ -512,6 +522,8 @@ def run_results_hybrid_pipeline(
       - Orphaned Drive sheets (found in metadata, not referenced by race list) are warnings.
       - Missing sheet resolutions (race references a title not found in Drive) are warnings and skipped.
     """
+
+    _reset_duckdb_file(duckdb_path)
     _init_duckdb_file(duckdb_path)
 
     df_dim_races = build_dim_races(data, warehouse_env)

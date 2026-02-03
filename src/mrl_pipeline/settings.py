@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     ### Environment config
 
     environment_name: str = Field(
-        description="Name of deployment environment (prod, dev, stg, etc.)"
+        default="dev",
+        description="Name of deployment environment (prod, dev, stg, etc.)",
     )
 
     ### Google-Drive-specific config

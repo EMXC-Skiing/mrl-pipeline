@@ -3,7 +3,7 @@ config/
 service.json
 
 # Environments
-.env
+*.env
 .venv
 env/
 venv/
@@ -50,6 +50,7 @@ db/
 .vscode/settings.json
 .vscode/tasks.json
 .vscode/launch.json
+*.code-workspace
 
 # macOS
 .DS_Store

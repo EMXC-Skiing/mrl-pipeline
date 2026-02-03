@@ -4,18 +4,22 @@ This module defines the base class from which MRL models are instantiated.
 
 """
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
-import dagster as dg
-import duckdb
-from dagster_duckdb import DuckDBResource
+from duckdb import DuckDBPyConnection
+from prefect import get_run_logger, task
+
+from mrl_pipeline.io.database_connectors import (
+    DatabaseConnector,
+    LocalDuckDBConnector,
+)
 
 
 class PipelineModel:
     """Base class representing a model within the MRL pipeline.
 
     This class encapsulates both metadata and execution logic for a model,
-    enabling it to be integrated as a dagster asset.
+    enabling it to be integrated as a Prefect task.
 
     Attributes:
         name (str): Unique identifier for the model.
@@ -34,6 +38,7 @@ class PipelineModel:
         deps: list[str],
         runner: Callable,
         column_descriptions: Optional[dict[str, str]] = None,
+        connector: Optional[DatabaseConnector] = None,
     ) -> None:
         """Initialize a PipelineModel instance with its metadata and execution
             parameters.
@@ -53,65 +58,54 @@ class PipelineModel:
         self.deps = deps
         self.runner = runner
         self.column_descriptions = column_descriptions or {}
-        self.asset_metadata = {
-            "dagster/column_schema": dg.TableSchema(
-                columns=[
-                    dg.TableColumn(name=k, description=v)
-                    for k, v in self.column_descriptions.items()
-                ],
-            ),
+        self.connector = connector or LocalDuckDBConnector()
+
+    def run(self, *runner_args: Any, **runner_kwargs: Any) -> dict[str, Any]:
+        """Execute the model and return serializable metadata about the run."""
+
+        kwargs = dict(runner_kwargs)
+        kwargs.setdefault("connector", self.connector)
+
+        conn = self.runner(*runner_args, **kwargs)
+
+        result: dict[str, Any] = {
+            "status": "success",
+            "table": self.name,
         }
 
-    def run(self) -> duckdb.DuckDBPyConnection:
-        """Execute the model's logic with any provided arguments and keyword arguments.
+        if isinstance(conn, DuckDBPyConnection):
+            try:
+                row_count = conn.execute(
+                    f"SELECT count(*) FROM {self.name}"
+                ).fetchone()[0]  # noqa: S608
+                result["row_count"] = row_count
+            except Exception as exc:  # noqa: BLE001
+                result["status"] = "inspection_failed"
+                result["error"] = str(exc)
+            finally:
+                conn.close()
+        else:
+            result["status"] = "no_connection"
 
-        Args:
-            *args: Variable length argument list.
-            **kwargs: Arbitrary keyword arguments.
+        return result
 
-        Returns:
-            Any: The result of the model's computation.
+    def build(self) -> Callable[..., dict[str, Any]]:
+        """Create a Prefect task that encapsulates the model's execution logic."""
 
-        """
-        return self.runner(duckdb)
+        @task(name=self.name, description=self.description)
+        def run_model(*runner_args: Any, **runner_kwargs: Any) -> dict[str, Any]:
+            """Execute the model and log simple telemetry."""
 
-    def build(self) -> Callable:
-        """Create a Dagster asset that wraps the model's execution logic.
+            result = self.run(*runner_args, **runner_kwargs)
 
-        This method uses the Dagster @asset decorator to convert the model's runner
-        function into an asset.
+            logger = get_run_logger()
+            status = result.get("status")
+            row_count = result.get("row_count")
+            logger.info("%s status=%s row_count=%s", self.name, status, row_count)
 
-        Returns:
-            Callable: A Dagster asset that executes the model's logic.
+            if error := result.get("error"):
+                logger.warning("%s inspection error: %s", self.name, error)
 
-        """
-
-        @dg.asset(
-            name=self.name,
-            deps=self.deps,
-            description=self.description,
-            metadata=self.asset_metadata,
-        )
-        def run_model(
-            context: dg.AssetExecutionContext,
-            duckdb_resource: DuckDBResource,
-        ) -> dg.MaterializeResult:
-            # Run the model with any provided arguments and keyword arguments.
-            conn = self.runner(duckdb)
-
-            row_count = conn.execute(f"""
-            SELECT count(*) FROM {self.name}
-            """).fetchone()[0]  # noqa: S608
-
-            preview_df = conn.execute(f"""
-            SELECT * FROM {self.name} LIMIT 10
-            """).df()  # noqa: S608
-
-            return dg.MaterializeResult(
-                metadata={
-                    "row_count": dg.MetadataValue.int(row_count),
-                    "preview": dg.MetadataValue.md(preview_df.to_markdown(index=False)),
-                },
-            )
+            return result
 
         return run_model

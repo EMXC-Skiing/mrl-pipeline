@@ -1,14 +1,15 @@
-"""data_connectors.py. This module uses the Google Sheets API to fetch Google
-Sheets containing prep_results data
-"""
+"""Google Drive helper wrapping credential loading and file discovery."""
 
 import json
 import os
-from typing import Dict, List, Optional
+import pathlib
+from typing import Dict, List, Optional, Sequence, Union
 
 import pandas as pd
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+
+from mrl_pipeline.settings import settings
 
 
 class DriveService:
@@ -31,9 +32,9 @@ class DriveService:
 
     def __init__(
         self,
-        service_account_path: Optional[str] = None,
-        service_account_env_var: Optional[str] = None,
-        scopes: Optional[str] = None,
+        service_account: Optional[Union[str, pathlib.Path, dict]] = None,
+        service_account_env_var: str = "GOOGLE_SERVICE_ACCOUNT_CREDENTIALS",
+        scopes: Optional[Sequence[str]] = None,
     ) -> None:
         """Initialize the data connector with the provided authentication."""
         # Set default scopes
@@ -42,21 +43,47 @@ class DriveService:
 
         self.scopes = scopes
 
-        # Load credentials
-        if service_account_path:
-            credentials = Credentials.from_service_account_file(
-                service_account_path,
-            ).with_scopes(self.scopes)
-        elif service_account_env_var:
-            credentials = Credentials.from_service_account_info(
-                json.loads(os.getenv(service_account_env_var)),
-            ).with_scopes(self.scopes)
-        else:
-            msg = "No service account provided"
-            raise ValueError(msg)
+        raw_credentials = service_account
+        if raw_credentials is None:
+            attr_name = service_account_env_var.lower()
+            raw_credentials = getattr(settings, attr_name, None)
+            if raw_credentials is None:
+                raw_credentials = os.getenv(service_account_env_var)
+            if raw_credentials is None:
+                raise RuntimeError(
+                    f"Missing configuration value for '{service_account_env_var}'.",
+                )
+
+        credentials = self._build_credentials(raw_credentials)
+        credentials = credentials.with_scopes(self.scopes)
 
         # Build the Drive service
         self.service = build("drive", "v3", credentials=credentials)
+
+    def _build_credentials(
+        self,
+        payload: Union[str, pathlib.Path, dict],
+    ) -> Credentials:
+        """Construct service account credentials from various payload formats."""
+
+        if isinstance(payload, Credentials):
+            return payload
+
+        if isinstance(payload, dict):
+            return Credentials.from_service_account_info(payload)
+
+        if isinstance(payload, pathlib.Path):
+            return Credentials.from_service_account_file(str(payload))
+
+        if isinstance(payload, str):
+            try:
+                parsed = json.loads(payload)
+            except json.JSONDecodeError:
+                return Credentials.from_service_account_file(str(pathlib.Path(payload)))
+            else:
+                return Credentials.from_service_account_info(parsed)
+
+        raise ValueError("Unsupported service account payload type.")
 
     def _list_files(
         self,

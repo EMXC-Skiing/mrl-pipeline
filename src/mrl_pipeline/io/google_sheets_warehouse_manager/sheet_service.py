@@ -1,41 +1,23 @@
 import json
-from datetime import datetime
+import os
+from pathlib import Path
+from typing import Optional
 
 import gspread
-import pytz
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
 from pandas import DataFrame
 
-from mrl_pipeline.io.resilient_gspread_client import ResilientGspreadClient
-from mrl_pipeline.io.schema_gsheet import SchemaGSheet
-from mrl_pipeline.utils import google_drive_environments_path
-
-
-def _return_timestamp():
-    eastern = pytz.timezone("America/New_York")
-    return datetime.now(eastern).strftime("%y-%m-%d_%H:%M")
-
-
-class TableVersionRef:
-    def __init__(self, table_name, env="prod", timestamp=None):
-        """:param table_name: The base name of the table.
-        :param env: The target environment.
-        :param timestamp: Optional timestamp for versioning archived tables.
-        """
-        self.table_name = table_name
-        self.env = env
-        self.tstamp = timestamp or _return_timestamp()
-        self.env_suffix = "" if self.env == "prod" else f"_{env}"
-
-        self._dict = {
-            "primary": f"{self.table_name}{self.env_suffix}",
-            "temp": f"__{self.table_name}_TEMP{self.env_suffix}",
-            "archive": f"_{self.table_name}{self.env_suffix}_{self.tstamp}",
-        }
-
-    def __getitem__(self, key):
-        return self._dict.get(key, None)
+from mrl_pipeline.io.google_sheets_warehouse_manager.resilient_gspread_client import (
+    ResilientGspreadClient,
+)
+from mrl_pipeline.io.google_sheets_warehouse_manager.schema_gsheet import SchemaGSheet
+from mrl_pipeline.io.warehouse_service import (
+    TableVersionRef,
+    WarehouseService,
+    _default_timestamp,
+)
+from mrl_pipeline.settings import settings
 
 
 class TableVersionManager:
@@ -51,7 +33,7 @@ class TableVersionManager:
         self.gc = gclient
         self.env_folder_ids = env_folder_ids
         self.env = env
-        self.timestamp = timestamp or _return_timestamp()
+        self.timestamp = timestamp or _default_timestamp()
         self.temp_tables = {}
 
     def create_table(self, table_name, lifecycle_management=True):
@@ -134,40 +116,62 @@ class TableVersionManager:
                     self.gc.del_spreadsheet(previous_sheet.id)
 
 
-class SheetService:
+class SheetService(WarehouseService):
     def __init__(
         self,
-        auth_credentials: str,
-        env: str = "prod",
-        warehouse_folder_ids: dict = None,
-        path_to_warehouse_folder_ids: str = None,
+        env: str,
+        auth_credentials: Optional[str] = None,
+        warehouse_folder_id_env_var: str = "MNP_GOOGLE_DRIVE_WAREHOUSE_FOLDER_IDS",
         **kwargs,
     ):
-        """Initializes the high-level data interface, setting up the environment
-        and client and initializing necessary managers.
+        super().__init__(env=env, auth_credentials=auth_credentials, **kwargs)
 
-        :param client: The base authenticated gspread client
-        :param env: Environment, e.g., 'prod' or 'dev', to control behavior like sheet
-        naming.
-        :param kwargs: Additional arguments passed for specific configuration,
-                       e.g., folder_id, retry parameters, etc.
-        """
         self.env = env
-
-        if path_to_warehouse_folder_ids is None:
-            path_to_warehouse_folder_ids = google_drive_environments_path
-
-        with open(path_to_warehouse_folder_ids, "r") as f:
-            self.warehouse_folder_ids = json.load(f)
+        attr_name = warehouse_folder_id_env_var.lower()
+        folder_ids = getattr(settings, attr_name, None)
+        if folder_ids is None:
+            raw_folder_ids = os.getenv(warehouse_folder_id_env_var)
+            if raw_folder_ids is not None:
+                try:
+                    folder_ids = json.loads(raw_folder_ids)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        "Expected JSON mapping for Google Drive warehouse folder IDs.",
+                    ) from exc
+        if folder_ids is None:
+            raise RuntimeError(
+                f"Missing configuration value for '{warehouse_folder_id_env_var}'.",
+            )
+        self.warehouse_folder_ids = folder_ids
 
         scope = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
             "https://www.googleapis.com/auth/spreadsheets",
         ]
-        creds = Credentials.from_service_account_info(
-            json.loads(auth_credentials),
-        ).with_scopes(scope)
+        raw_credentials = auth_credentials
+        if raw_credentials is None:
+            raw_credentials = settings.google_service_account_credentials
+            if raw_credentials is None:
+                raw_credentials = os.getenv("GOOGLE_SERVICE_ACCOUNT_CREDENTIALS")
+            if raw_credentials is None:
+                raise RuntimeError(
+                    "Missing configuration value for 'GOOGLE_SERVICE_ACCOUNT_CREDENTIALS'.",
+                )
+        if isinstance(raw_credentials, dict):
+            creds_info = raw_credentials
+        else:
+            creds_source = raw_credentials
+            if isinstance(creds_source, Path):
+                creds_source = creds_source.read_text()
+            try:
+                creds_info = json.loads(str(creds_source))
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "Expected JSON payload for Google service account credentials.",
+                ) from exc
+
+        creds = Credentials.from_service_account_info(creds_info).with_scopes(scope)
         base_gc = gspread.authorize(creds)
         self.gc = ResilientGspreadClient(base_gc)
         self.version_manager = TableVersionManager(

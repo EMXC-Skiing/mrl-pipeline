@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 from hashlib import sha256
 
@@ -211,3 +212,163 @@ def build_dim_results(
     ]
 
     return df_dim_results
+
+
+def build_dim_registrations(
+    df_stg_registrations: pd.DataFrame,
+    *,
+    athlete_name_replacements: dict,
+    school_name_replacements: dict,
+) -> pd.DataFrame:
+    """
+    Transform-only function (no warehouse IO). Assumes helper fns exist:
+      - calc_athlete_id(df) -> Series
+      - calc_registration_id(df) -> Series
+
+    Inputs:
+      df_stg_registrations: already-fetched + concatenated staging registrations, with race_season present
+      athlete_name_replacements, school_name_replacements: artifacts from precursor function
+
+    Returns:
+      df_dim_registrations
+    """
+
+    df = df_stg_registrations.copy().convert_dtypes()
+
+    # drop rows that are not related to EHS/U16 race registration
+    eligible_categories = [
+        "U16/EHS Qualifer - Boys",
+        "U16/EHS Qualifier - Girls",
+        "Late U16/EHS Mass Nordic Cup - Boys",
+        "Late U16/EHS Mass Nordic Cup - Girls",
+    ]
+    df = df.loc[
+        df["Category Entered / Merchandise Ordered"]
+        .astype("string")
+        .str.strip()
+        .isin(eligible_categories)
+    ]
+
+    # define replacements and standardize inputs
+    club_name_replacements = {
+        "I am not currently a member of a listed team or club": pd.NA,
+        "My Team / Club is not listed.": pd.NA,
+        "": pd.NA,
+        "Eastern Mass Nordic, inc (EMXC)": "EMXC",
+    }
+    membership_number_replacements = {"NO LICENSE": "", "INTERNATIONAL": ""}
+    gender_replacements = {"m": "b", "f": "g"}
+
+    # helpers local to this transform
+    def pdnum(x):
+        return pd.to_numeric(x, errors="coerce")
+
+    def fn_school_or_other(row):
+        school = row["School"]
+        other = row.get("SchoolOth")
+        val = school if school != "Other" else other
+        return val.title() if isinstance(val, str) else val
+
+    def fn_full_names(row):
+        first = row.get("First Name")
+        last = row.get("Last Name")
+        full = f"{first} {last}"
+        return full.title() if isinstance(full, str) else full
+
+    def process_grade(s):
+        # Step 1: integer present
+        for grade in range(7, 13):
+            if str(grade) in str(s):
+                return grade
+
+        # Step 2: keyword map
+        grade_keywords = {
+            "freshman": 9,
+            "firstyear": 9,
+            "sophomore": 10,
+            "junior": 11,
+            "senior": 12,
+        }
+        s_cleaned = re.sub(r"[^a-z0-9]", "", str(s).lower())
+        for keyword, grade in grade_keywords.items():
+            if keyword in s_cleaned:
+                return grade
+
+        return pd.NA
+
+    # Construct final DataFrame with standardized and transformed columns
+    df_dim_registrations = pd.DataFrame(
+        {
+            "athlete_name": (
+                df.apply(fn_full_names, axis=1)
+                .astype("string")
+                .replace(athlete_name_replacements)
+            ),
+            "race_season": pdnum(df["race_season"]).astype("int64"),
+            "city_town": df["City"].astype("string").str.title(),
+            "state": df["State"].astype("string").str.upper(),
+            "school": (
+                df.apply(fn_school_or_other, axis=1)
+                .replace(school_name_replacements)
+                .astype("string")
+            ),
+            "club": df["Club"].replace(club_name_replacements).astype("string"),
+            "gender": df["Gender"]
+            .astype("string")
+            .str.lower()
+            .replace(gender_replacements),
+            "nensa_number": (
+                pdnum(
+                    df["NENSA License"].replace(membership_number_replacements)
+                ).astype("Int64")
+            ),
+            "usss_number": (
+                pdnum(
+                    df["USSS Member #"].replace(membership_number_replacements)
+                ).astype("Int64")
+            ),
+            "birth_year": pdnum(df["Birth Year"]).astype("int64"),
+            "grade": pdnum(df["Grade"].apply(process_grade)).astype("Int64"),
+        }
+    ).sort_values(by=["athlete_name", "race_season"], ascending=[True, False])
+
+    # calculate ids
+    df_dim_registrations["athlete_id"] = calc_athlete_id(df_dim_registrations)
+    df_dim_registrations["registration_id"] = calc_registration_id(df_dim_registrations)
+
+    # US Ski & Snowboard age is the athlete's age at the end of December of a racing season
+    df_dim_registrations["usss_age"] = (
+        df_dim_registrations["race_season"] - 1
+    ) - df_dim_registrations["birth_year"]
+
+    # add U16s and EHS qualification eligibility
+    df_dim_registrations["is_ehs_eligible"] = df_dim_registrations["grade"].isin(
+        [9, 10, 11, 12]
+    )
+    df_dim_registrations["is_u16c_eligible"] = df_dim_registrations["usss_age"].isin(
+        [14, 15]
+    )
+
+    # filter to only registrations eligible for U16s or EHS
+    df_dim_registrations = df_dim_registrations.loc[
+        df_dim_registrations["is_ehs_eligible"]
+        | df_dim_registrations["is_u16c_eligible"]
+    ]
+
+    leading_columns = [
+        "registration_id",
+        "race_season",
+        "athlete_id",
+        "athlete_name",
+        "gender",
+        "school",
+        "club",
+        "city_town",
+        "state",
+    ]
+    df_dim_registrations = df_dim_registrations[
+        leading_columns
+        + [c for c in df_dim_registrations.columns if c not in leading_columns]
+    ]
+
+    return df_dim_registrations

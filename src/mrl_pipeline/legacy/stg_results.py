@@ -387,7 +387,8 @@ def _init_duckdb_file(db_path: str) -> None:
     try:
         con.execute("INSTALL httpfs;")
         con.execute("LOAD httpfs;")
-        con.execute("SET duckdb_allow_extension_autoload=false")
+        con.execute("SET autoinstall_known_extensions = false;")
+        con.execute("SET autoload_known_extensions = false;")
     finally:
         con.close()
 
@@ -402,7 +403,8 @@ def process_one_sheet_into_duckdb(
       (ok, standardized_table_name)
     """
     con = duckdb.connect(db_path)
-    con.execute("SET duckdb_allow_extension_autoload=false")
+    con.execute("SET autoinstall_known_extensions = false;")
+    con.execute("SET autoload_known_extensions = false;")
 
     try:
         suffix = uuid.uuid4().hex[:12]

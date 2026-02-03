@@ -534,7 +534,7 @@ def add_results_urls_to_dim_races(
 # =============================================================================
 # Orchestration
 # =============================================================================
-def run_results_hybrid_pipeline(
+def build_stg_results_and_dim_races(
     *,
     data,
     google_hex_credentials: str,

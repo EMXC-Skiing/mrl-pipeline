@@ -373,7 +373,6 @@ def load_httpfs_serialized(con: duckdb.DuckDBPyConnection) -> None:
 
     Notes:
       - Uses `LOAD httpfs;` inside a global lock to prevent concurrent init.
-      - Calls `INSTALL httpfs;` as well (safe to repeat).
       - If DuckDB throws the known double-init error, treat it as success.
     """
     with _HTTPFS_LOAD_LOCK:

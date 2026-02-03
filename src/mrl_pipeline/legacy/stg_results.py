@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import os
 import json
 import uuid
@@ -357,6 +358,35 @@ def validate_drive_lookup_against_races(
 # =============================================================================
 # Parallel DuckDB ingestion: per-sheet raw ingest -> standardized table -> union
 # =============================================================================
+# One global lock to serialize extension LOAD across all threads.
+_HTTPFS_LOAD_LOCK = threading.Lock()
+
+
+def _is_httpfs_double_init_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return "already registered secret type" in msg and "s3" in msg
+
+
+def load_httpfs_serialized(con: duckdb.DuckDBPyConnection) -> None:
+    """
+    Ensure httpfs is loaded for this connection, serializing the LOAD across threads.
+
+    Notes:
+      - Uses `LOAD httpfs;` inside a global lock to prevent concurrent init.
+      - Calls `INSTALL httpfs;` as well (safe to repeat).
+      - If DuckDB throws the known double-init error, treat it as success.
+    """
+    with _HTTPFS_LOAD_LOCK:
+        try:
+            # LOAD is what triggers init; serialize to avoid race.
+            con.execute("LOAD httpfs;")
+        except Exception as e:
+            if not _is_httpfs_double_init_error(e):
+                raise
+            # If we hit the known "already registered" error, another thread likely
+            # initialized it; proceed.
+
+
 @dataclass(frozen=True)
 class SheetTask:
     """
@@ -386,9 +416,6 @@ def _init_duckdb_file(db_path: str) -> None:
     con = duckdb.connect(db_path)
     try:
         con.execute("INSTALL httpfs;")
-        con.execute("LOAD httpfs;")
-        con.execute("SET autoinstall_known_extensions = false;")
-        con.execute("SET autoload_known_extensions = false;")
     finally:
         con.close()
 
@@ -403,15 +430,16 @@ def process_one_sheet_into_duckdb(
       (ok, standardized_table_name)
     """
     con = duckdb.connect(db_path)
-    con.execute("SET autoinstall_known_extensions = false;")
-    con.execute("SET autoload_known_extensions = false;")
 
     try:
+        # Ensure httpfs is loaded in serial
+
         suffix = uuid.uuid4().hex[:12]
         raw_table = f"raw_{suffix}"
         std_table = f"std_{suffix}"
 
         try:
+            load_httpfs_serialized(con)
             con.execute(f"""
                 CREATE OR REPLACE TABLE "{raw_table}" AS
                 SELECT *

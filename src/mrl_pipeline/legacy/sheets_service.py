@@ -23,6 +23,7 @@ from typing import (
 
 import gspread
 import pytz
+from duckdb import IOException  # unused here, but kept if you have shared modules
 from google.oauth2.service_account import Credentials
 from gspread import Client, Spreadsheet, Worksheet
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
@@ -455,8 +456,8 @@ class DataConnector:
     def __init__(
         self,
         auth_credentials: str,
-        warehouse_folder_ids: Mapping[str, str],
         env: str = "prod",
+        warehouse_folder_ids: Optional[Mapping[str, str]] = None,
         retries: int = 10,
         delay: float = 5.0,
         backoff_factor: float = 2.0,

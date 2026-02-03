@@ -456,7 +456,7 @@ class DataConnector:
         self,
         auth_credentials: str,
         warehouse_folder_ids: Mapping[str, str],
-        env: str = "prod",
+        env: str = "dev",
         retries: int = 10,
         delay: float = 5.0,
         backoff_factor: float = 2.0,

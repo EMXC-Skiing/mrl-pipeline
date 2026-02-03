@@ -393,7 +393,7 @@ def process_one_sheet_into_duckdb(
     """
     con = duckdb.connect(db_path)
     try:
-        con.execute("LOAD httpfs;")
+        # con.execute("LOAD httpfs;")
 
         suffix = uuid.uuid4().hex[:12]
         raw_table = f"raw_{suffix}"

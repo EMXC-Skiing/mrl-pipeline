@@ -240,7 +240,9 @@ def build_dim_registrations(
         "U16/EHS Qualifer - Boys",
         "U16/EHS Qualifier - Girls",
         "Late U16/EHS Mass Nordic Cup - Boys",
+        "Late U16/EHS Mass Nordic Cup - Boys UNSEEDED",
         "Late U16/EHS Mass Nordic Cup - Girls",
+        "Late U16/EHS Mass Nordic Cup - Girls UNSEEDED",
     ]
     df = df.loc[
         df["Category Entered / Merchandise Ordered"]

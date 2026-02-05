@@ -1,47 +1,15 @@
 import numpy as np
 import pandas as pd
 from sklearn import linear_model
+from tqdm import tqdm
 
 
-def build_df_ext_athlete_penalties_prep(
-    df_log_ratio_times_by_publication_date: pd.DataFrame,
-    df_dim_registrations: pd.DataFrame,
-) -> pd.DataFrame:
-    key_cols = ["penalty_list_season", "penalty_list_date", "gender", "athlete_id"]
-
-    df_prep = (
-        df_log_ratio_times_by_publication_date[key_cols]
-        .drop_duplicates()
-        .sort_values(key_cols)
-        .reset_index(drop=True)
-    )
-
-    # Optional: attach registration attributes at season x athlete_id
-    reg_cols = [
-        "race_season",
-        "athlete_id",
-        "athlete_name",
-        "school",
-        "club",
-        "city_town",
-        "state",
-        "usss_age",
-        "grade",
-        "is_ehs_eligible",
-        "is_u16c_eligible",
-    ]
-
-    df_prep = df_prep.merge(
-        df_dim_registrations[reg_cols],
-        left_on=["penalty_list_season", "athlete_id"],
-        right_on=["race_season", "athlete_id"],
-        how="left",
-    ).drop(columns=["race_season"])
-
-    return df_prep
+# -----------------------------------------------------------------------------
+# Prepare input tables
+# -----------------------------------------------------------------------------
 
 
-def build_df_log_ratio_times_by_publication_date(
+def build_df_results_by_penalty_window_prep(
     df_dim_registrations: pd.DataFrame,
     df_dim_results: pd.DataFrame,
     df_ext_races_by_penalty_window: pd.DataFrame,
@@ -107,32 +75,47 @@ def build_df_log_ratio_times_by_publication_date(
     )
 
     # Top finisher per (penalty_list_date, race_id, gender)
-    top_finishers = df_rc.loc[
-        df_rc["ma_athlete_place"] == 1,
-        ["penalty_list_date", "race_id", "gender", "time_float", "athlete_id"],
-    ].rename(
-        columns={
-            "time_float": "reference_time_float",
-            "athlete_id": "reference_athlete_id",
-        }
+    gcols = ["penalty_list_date", "race_id", "gender"]
+
+    top_finishers = (
+        df_rc.sort_values(
+            gcols + ["time_float", "athlete_id"]
+        )  # athlete_id as deterministic tie-break
+        .drop_duplicates(subset=gcols, keep="first")
+        .loc[:, ["penalty_list_date", "race_id", "gender", "time_float", "athlete_id"]]
+        .rename(
+            columns={
+                "time_float": "reference_time_float",
+                "athlete_id": "reference_athlete_id",
+            }
+        )
     )
 
-    # Attach top finisher and compute log-ratio features
-    df_log = df_rc.merge(
+    # Attach top finisher and compute log-ratio features (winners included => log_ratio = 0)
+    df_results_by_penalty_window = df_rc.merge(
         top_finishers,
         on=["penalty_list_date", "race_id", "gender"],
         how="left",
     )
 
-    df_log["time_log_ratio"] = np.log(
-        df_log["time_float"] / df_log["reference_time_float"]
+    # NEW: log_time (natural log of time_float)
+    df_results_by_penalty_window["log_time"] = np.log(
+        df_results_by_penalty_window["time_float"]
     )
-    df_log["days_from_race_to_publication"] = (
-        df_log["penalty_list_date"] - df_log["race_date"]
+
+    # Keep existing time_log_ratio for compatibility/diagnostics (also includes winners)
+    df_results_by_penalty_window["time_log_ratio"] = np.log(
+        df_results_by_penalty_window["time_float"]
+        / df_results_by_penalty_window["reference_time_float"]
+    )
+
+    df_results_by_penalty_window["days_from_race_to_publication"] = (
+        df_results_by_penalty_window["penalty_list_date"]
+        - df_results_by_penalty_window["race_date"]
     ).dt.days
 
     out = (
-        df_log[
+        df_results_by_penalty_window[
             [
                 "penalty_list_season",
                 "penalty_list_date",
@@ -141,9 +124,11 @@ def build_df_log_ratio_times_by_publication_date(
                 "gender",
                 "athlete_id",
                 "athlete_name",
-                "series",  # from df_ext_races_by_penalty_window (window table)
+                "series",
                 "reference_athlete_id",
-                "time_log_ratio",
+                "time_float",
+                "log_time",  # NEW
+                "time_log_ratio",  # still present
                 "days_from_race_to_publication",
             ]
         ]
@@ -156,8 +141,46 @@ def build_df_log_ratio_times_by_publication_date(
     return out
 
 
+def build_df_ext_athlete_penalties_prep(
+    df_results_by_penalty_window_prep: pd.DataFrame,
+    df_dim_registrations: pd.DataFrame,
+) -> pd.DataFrame:
+    key_cols = ["penalty_list_season", "penalty_list_date", "gender", "athlete_id"]
+
+    df_prep = (
+        df_results_by_penalty_window_prep[key_cols]
+        .drop_duplicates()
+        .sort_values(key_cols)
+        .reset_index(drop=True)
+    )
+
+    # Optional: attach registration attributes at season x athlete_id
+    reg_cols = [
+        "race_season",
+        "athlete_id",
+        "athlete_name",
+        "school",
+        "club",
+        "city_town",
+        "state",
+        "usss_age",
+        "grade",
+        "is_ehs_eligible",
+        "is_u16c_eligible",
+    ]
+
+    df_prep = df_prep.merge(
+        df_dim_registrations[reg_cols],
+        left_on=["penalty_list_season", "athlete_id"],
+        right_on=["race_season", "athlete_id"],
+        how="left",
+    ).drop(columns=["race_season"])
+
+    return df_prep
+
+
 # -----------------------------------------------------------------------------
-# 2) Penalty calculation v2025 as an .assign()-friendly function
+# Calculate penalties
 # -----------------------------------------------------------------------------
 
 
@@ -249,17 +272,23 @@ def standardize_penalties_first_date_cohort(
 
 
 def calculate_penalties_2025(
-    df_log: pd.DataFrame,
+    df_results_by_penalty_window: pd.DataFrame,
     *,
     target: pd.DataFrame,
     target_mean: float = 200.0,
     robust_pctiles: tuple[float, float] = (0.25, 0.75),
 ) -> dict[str, np.ndarray]:
     """
-    Fit on df_log (race-grain), return arrays aligned to `target` (athlete-grain).
+    Fit on df_results_by_penalty_window (race-grain), return arrays aligned to `target` (athlete-grain).
     Intended usage:
         df_ext = df_ext_prep.assign(**calculate_penalties_2025(df_log, target=df_ext_prep))
     """
+
+    # drop rows of results table corresponding to race winners
+    df_results_by_penalty_window = df_results_by_penalty_window.loc[
+        df_results_by_penalty_window["athlete_id"]
+        != df_results_by_penalty_window["reference_athlete_id"]
+    ].copy()
 
     group_cols = ["penalty_list_season", "penalty_list_date", "gender"]
 
@@ -316,8 +345,14 @@ def calculate_penalties_2025(
 
     # ---- fit per (season, date, gender) -> athlete penalties ----
 
+    group_iter = df_results_by_penalty_window.groupby(group_cols, dropna=False)
+    # Optional: total count for nicer progress reporting (does one extra groupby internally)
+    total_groups = group_iter.ngroups
+
     dfs = []
-    for key, grp in df_log.groupby(group_cols, dropna=False):
+    for key, grp in tqdm(
+        group_iter, total=total_groups, desc="Penalties 2025: publication-date groups"
+    ):
         X, y = construct_X_y(grp)
         if X is None:
             continue
@@ -375,17 +410,8 @@ def calculate_penalties_2025(
     }
 
 
-# -----------------------------------------------------------------------------
-# 2.5) 2026 penalties with outlier removal
-# -----------------------------------------------------------------------------
-
-import numpy as np
-import pandas as pd
-from sklearn import linear_model
-
-
 def calculate_penalties_2026(
-    df_log: pd.DataFrame,
+    df_results_by_penalty_window: pd.DataFrame,
     *,
     target: pd.DataFrame,
     target_mean: float = 200.0,
@@ -394,49 +420,64 @@ def calculate_penalties_2026(
     outlier_sigma: float = 2.0,
 ) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
     """
-    Returns:
-      (df_log_with_outliers, penalty_dict)
+    Model (within each penalty_list_season x penalty_list_date x gender group):
 
-    Where:
-      - df_log_with_outliers: df_log with boolean column is_outlier_race (race-grain)
-      - penalty_dict: arrays aligned to `target` (athlete-grain), keys:
-          * athlete_penalty_26
-          * standardized_athlete_penalty_26
+        log_time = race_intercept_(race_id, gender) + athlete_penalty_(athlete_id) + eps
+
+    - Uses *every* race-row (including winners).
+    - No global intercept.
+    - Identifiability via constraint: sum(athlete_penalty) = 0.
+
+    Returns:
+      (df_ext_results_by_penalty_window, penalty_dict)
+
+    df_ext_results_by_penalty_window has (row-grain) columns:
+      - is_outlier_race
+      - initial_residual
+      - adjusted_residual
     """
 
     group_cols = ["penalty_list_season", "penalty_list_date", "gender"]
 
-    # ---- helpers ----
-
     def construct_X_y(group: pd.DataFrame):
-        # Match 2025: omit rows where athlete_id == reference_athlete_id
-        g = group.loc[group["athlete_id"] != group["reference_athlete_id"]].copy()
+        g = group.copy()
+        g = g.loc[g["log_time"].notna()].copy()
         if g.empty:
-            return None, None, None
+            return None, None, None, None, None
 
+        # Preserve original row index for later dropping/merging
+        g["_orig_idx"] = g.index
+
+        races = pd.Index(g["race_id"].astype("string").unique(), name="race_id")
         athletes = pd.Index(
-            pd.concat([g["athlete_id"], g["reference_athlete_id"]]).unique()
+            g["athlete_id"].astype("string").unique(), name="athlete_id"
         )
-        X = pd.DataFrame(0.0, index=range(len(g)), columns=athletes)
 
-        a_ids = g["athlete_id"].to_numpy()
-        r_ids = g["reference_athlete_id"].to_numpy()
-        col_index = {col: j for j, col in enumerate(X.columns)}
+        race_cols = pd.Index([f"race::{rid}" for rid in races], name="race_col")
+        ath_cols = pd.Index([f"ath::{aid}" for aid in athletes], name="ath_col")
+        cols = race_cols.append(ath_cols)
 
+        X = pd.DataFrame(0.0, index=range(len(g)), columns=cols)
+
+        race_ids = g["race_id"].astype("string").to_numpy()
+        athlete_ids = g["athlete_id"].astype("string").to_numpy()
+
+        col_index = {c: j for j, c in enumerate(X.columns)}
         for i in range(len(g)):
-            X.iat[i, col_index[a_ids[i]]] = 1.0
-            X.iat[i, col_index[r_ids[i]]] = -1.0
+            X.iat[i, col_index[f"race::{race_ids[i]}"]] = 1.0
+            X.iat[i, col_index[f"ath::{athlete_ids[i]}"]] = 1.0
 
-        y = g["time_log_ratio"].to_numpy()
+        y = g["log_time"].to_numpy()
 
-        # mean-to-zero constraint row (same as 2025)
-        mean_row = pd.DataFrame(
-            {c: 1.0 / len(athletes) for c in athletes}, index=[len(X)]
-        )
-        X = pd.concat([X, mean_row], axis=0)
+        # Constraint: sum athlete penalties = 0
+        constraint = pd.DataFrame({c: 0.0 for c in cols}, index=[len(X)])
+        for c in ath_cols:
+            constraint.at[len(X), c] = 1.0
+
+        X = pd.concat([X, constraint], axis=0)
         y = np.append(y, 0.0)
 
-        return X, y, g
+        return X, y, g, race_cols, ath_cols
 
     def scale_to_target_mean(arr: np.ndarray) -> np.ndarray:
         lo, hi = robust_pctiles
@@ -452,28 +493,31 @@ def calculate_penalties_2026(
     # ---- storage ----
     penalty_rows: list[pd.DataFrame] = []
 
-    # For outlier flags, accumulate a mapping at race-grain by stable keys
     outlier_key_cols = group_cols + ["race_id", "athlete_id"]
-    outlier_rows: list[pd.DataFrame] = []
+    diag_rows: list[pd.DataFrame] = []  # <-- outlier + residual diagnostics
 
     # ---- per-group fit ----
-    for key, grp in df_log.groupby(group_cols, dropna=False):
-        X1, y1, g1 = construct_X_y(grp)
+    group_iter = df_results_by_penalty_window.groupby(group_cols, dropna=False)
+    total_groups = group_iter.ngroups
+
+    for key, grp in tqdm(
+        group_iter, total=total_groups, desc="Penalties 2026: publication-date groups"
+    ):
+        X1, y1, g1, race_cols1, ath_cols1 = construct_X_y(grp)
         if X1 is None:
             continue
 
         # ----- first fit -----
-        model1 = linear_model.LinearRegression()
+        model1 = linear_model.LinearRegression(fit_intercept=False)
         model1.fit(X1, y1)
 
-        # Residuals on real rows only (exclude constraint row)
         X1_real = X1.iloc[:-1, :]
         y1_real = y1[:-1]
         pred1 = model1.predict(X1_real)
-        resid1 = y1_real - pred1  # positive => slower than model expects (worse)
+        resid1 = y1_real - pred1
 
         g1 = g1.copy()
-        g1["_resid"] = resid1
+        g1["initial_residual"] = resid1
 
         # ----- outlier identification -----
         race_counts = g1.groupby("athlete_id", dropna=False).size()
@@ -482,51 +526,94 @@ def calculate_penalties_2026(
         if len(eligible) > 0:
             stats = (
                 g1.loc[g1["athlete_id"].isin(eligible)]
-                .groupby("athlete_id", dropna=False)["_resid"]
+                .groupby("athlete_id", dropna=False)["initial_residual"]
                 .agg(["mean", "std"])
                 .rename(columns={"mean": "_resid_mean", "std": "_resid_std"})
             )
 
-            g1 = g1.merge(stats, left_on="athlete_id", right_index=True, how="left")
+            g1["_resid_mean"] = g1["athlete_id"].map(stats["_resid_mean"])
+            g1["_resid_std"] = g1["athlete_id"].map(stats["_resid_std"])
 
             g1["is_outlier_race"] = (
                 g1["_resid_std"].notna()
                 & (g1["_resid_std"] > 0)
                 & (
-                    g1["_resid"]
+                    g1["initial_residual"]
                     > (g1["_resid_mean"] + outlier_sigma * g1["_resid_std"])
                 )
             )
         else:
             g1["is_outlier_race"] = False
 
-        # Save outlier flags for this group at race-grain
-        outlier_rows.append(
+        # ----- second fit (omit outliers) -----
+        outlier_orig_idx = g1.loc[g1["is_outlier_race"], "_orig_idx"].to_numpy()
+        grp2 = grp.drop(index=outlier_orig_idx) if outlier_orig_idx.size > 0 else grp
+
+        X2, y2, _g2, race_cols2, ath_cols2 = construct_X_y(grp2)
+
+        if X2 is None:
+            # fallback: use first model
+            model_used = model1
+            cols_used = X1.columns
+            race_cols = race_cols1
+            ath_cols = ath_cols1
+            coef = model1.coef_
+        else:
+            model2 = linear_model.LinearRegression(fit_intercept=False)
+            model2.fit(X2, y2)
+            model_used = model2
+            cols_used = X2.columns
+            race_cols = race_cols2
+            ath_cols = ath_cols2
+            coef = model2.coef_
+
+        # ----- adjusted residuals for ALL original rows -----
+        # Predict on the original group's rows (excluding constraint row) using the second model’s column set.
+        X_pred = X1_real.reindex(columns=cols_used, fill_value=0.0)
+        pred2 = model_used.predict(X_pred)
+        resid2 = y1_real - pred2
+
+        # If a row depends on a race/athlete column that disappeared in the refit,
+        # mark adjusted_residual as NaN (avoid implicitly treating missing effects as 0).
+        race_needed = ("race::" + g1["race_id"].astype("string")).to_numpy()
+        ath_needed = ("ath::" + g1["athlete_id"].astype("string")).to_numpy()
+        cols_set = set(cols_used.astype("string"))
+        ok = np.fromiter(
+            (
+                (r in cols_set) and (a in cols_set)
+                for r, a in zip(race_needed, ath_needed)
+            ),
+            dtype=bool,
+            count=len(g1),
+        )
+        adj = resid2.astype("float64")
+        adj[~ok] = np.nan
+        g1["adjusted_residual"] = adj
+
+        # Save diagnostics for this group at row-grain
+        diag_rows.append(
             g1.assign(
                 penalty_list_season=key[0],
                 penalty_list_date=key[1],
                 gender=key[2],
-            )[outlier_key_cols + ["is_outlier_race"]]
+            )[
+                outlier_key_cols
+                + ["is_outlier_race", "initial_residual", "adjusted_residual"]
+            ]
         )
 
-        # ----- second fit (omit outliers) -----
-        outlier_idx = g1.index[g1["is_outlier_race"]].to_numpy()
-        grp2 = grp.drop(index=outlier_idx) if outlier_idx.size > 0 else grp
+        # ----- penalties from second regression (athlete terms only) -----
+        cols_str = cols_used.astype("string")
+        ath_mask = cols_str.str.startswith("ath::").to_numpy()
+        ath_cols_full = cols_used[ath_mask]
+        ath_coef = coef[ath_mask]
 
-        X2, y2, _g2 = construct_X_y(grp2)
-
-        # If refit collapses, fall back to first fit
-        if X2 is None:
-            coef = model1.coef_
-            cols = X1.columns
-        else:
-            model2 = linear_model.LinearRegression()
-            model2.fit(X2, y2)
-            coef = model2.coef_
-            cols = X2.columns
-
-        raw = np.exp(coef)
+        raw = np.exp(ath_coef)
         athlete_penalty = scale_to_target_mean(raw)
+
+        athlete_ids = ath_cols_full.astype("string").str.replace(
+            "^ath::", "", regex=True
+        )
 
         penalty_rows.append(
             pd.DataFrame(
@@ -534,43 +621,59 @@ def calculate_penalties_2026(
                     "penalty_list_season": key[0],
                     "penalty_list_date": key[1],
                     "gender": key[2],
-                    "athlete_id": cols.astype("string"),
+                    "athlete_id": athlete_ids.astype("string"),
                     "athlete_penalty_26": athlete_penalty,
                 }
             )
         )
 
-    # ---- build df_log_with_outliers ----
-    df_log_with_outliers = df_log.copy()
-    df_log_with_outliers["is_outlier_race"] = False
+    # ---- build df_ext_results_by_penalty_window (+ residual columns) ----
+    df_ext_results_by_penalty_window = df_results_by_penalty_window.copy()
+    df_ext_results_by_penalty_window["is_outlier_race"] = False
+    df_ext_results_by_penalty_window["initial_residual"] = np.nan
+    df_ext_results_by_penalty_window["adjusted_residual"] = np.nan
 
-    if outlier_rows:
-        df_out = pd.concat(outlier_rows, ignore_index=True)
+    if diag_rows:
+        df_diag = pd.concat(diag_rows, ignore_index=True)
 
-        # In case duplicates arise, "any" is a safe aggregation
-        df_out = (
-            df_out.groupby(outlier_key_cols, dropna=False)["is_outlier_race"]
-            .any()
+        # Deduplicate safely (outlier: any; residuals: first non-null)
+        df_diag = (
+            df_diag.sort_values(outlier_key_cols)  # stable
+            .groupby(outlier_key_cols, dropna=False)
+            .agg(
+                is_outlier_race=("is_outlier_race", "any"),
+                initial_residual=("initial_residual", "first"),
+                adjusted_residual=("adjusted_residual", "first"),
+            )
             .reset_index()
         )
 
-        # merge back preserving original order
-        tmp = df_log_with_outliers.copy()
+        tmp = df_ext_results_by_penalty_window.copy()
         tmp["_row_i"] = np.arange(len(tmp))
-        tmp = tmp.merge(df_out, on=outlier_key_cols, how="left", suffixes=("", "_m"))
-        # prefer merged value when present
+        tmp = tmp.merge(df_diag, on=outlier_key_cols, how="left", suffixes=("", "_m"))
+
         tmp["is_outlier_race"] = tmp["is_outlier_race_m"].fillna(False).astype(bool)
+        tmp["initial_residual"] = tmp["initial_residual_m"]
+        tmp["adjusted_residual"] = tmp["adjusted_residual_m"]
+
         tmp = (
-            tmp.drop(columns=["is_outlier_race_m"])
+            tmp.drop(
+                columns=[
+                    "is_outlier_race_m",
+                    "initial_residual_m",
+                    "adjusted_residual_m",
+                ]
+            )
             .sort_values("_row_i")
             .drop(columns=["_row_i"])
         )
-        df_log_with_outliers = tmp
+
+        df_ext_results_by_penalty_window = tmp
 
     # ---- handle empty penalties ----
     if not penalty_rows:
         n_target = len(target)
-        return df_log_with_outliers, {
+        return df_ext_results_by_penalty_window, {
             "athlete_penalty_26": np.full(n_target, np.nan, dtype="float64"),
             "standardized_athlete_penalty_26": np.full(
                 n_target, np.nan, dtype="float64"
@@ -594,7 +697,7 @@ def calculate_penalties_2026(
     df_pen = df_pen.set_index(key_cols)
     aligned = df_pen.reindex(target_idx)
 
-    return df_log_with_outliers, {
+    return df_ext_results_by_penalty_window, {
         "athlete_penalty_26": aligned["athlete_penalty_26"].to_numpy(),
         "standardized_athlete_penalty_26": aligned[
             "standardized_athlete_penalty_26"
@@ -607,35 +710,71 @@ def calculate_penalties_2026(
 # -----------------------------------------------------------------------------
 
 
-def build_ext_athlete_penalties(
-    df_dim_races: pd.DataFrame,
+def build_penalties(
     df_dim_registrations: pd.DataFrame,
     df_dim_results: pd.DataFrame,
     df_ext_races_by_penalty_window: pd.DataFrame,
-) -> pd.DataFrame:
-    df_log_ratio_times_by_publication_date = (
-        build_df_log_ratio_times_by_publication_date(
-            df_dim_registrations=df_dim_registrations,
-            df_dim_results=df_dim_results,
-            df_ext_races_by_penalty_window=df_ext_races_by_penalty_window,
-        )
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Build two extract-style outputs used downstream by the warehouse / analytics layer:
+
+    1) ext_results_by_penalty_window (row-grain):
+       One row per (penalty_list_season, penalty_list_date, race_id, gender, athlete_id),
+       containing race results that fall inside each publication-date penalty window,
+       plus model diagnostics produced by the 2026 method (outliers + residuals).
+
+    2) ext_athlete_penalties (athlete-grain):
+       One row per (penalty_list_season, penalty_list_date, gender, athlete_id),
+       containing registration attributes and the computed penalties from both methods:
+         - athlete_penalty_25, standardized_athlete_penalty_25
+         - athlete_penalty_26, standardized_athlete_penalty_26
+
+    High-level flow:
+      A) Prepare the row-grain results table for modeling (df_results_by_penalty_window_prep).
+      B) Derive the athlete-grain "target" table for alignment / enrichment.
+      C) Compute 2025 penalties (winner-relative model) and align to target rows.
+      D) Compute 2026 penalties (race+athlete fixed effects) and diagnostics; align to target rows.
+      E) Join penalties onto target and sort for easy consumption.
+
+    Notes:
+      - Both calculate_penalties_* functions return arrays aligned to the *target* row order.
+        That is why we use `.assign(**penalty_dict)` instead of merging.
+      - The returned ext_results_by_penalty_window is intended to be materialized as its own
+        extract warehouse table for QA, debugging, and reproducibility.
+    """
+
+    # A) Row-grain modeling input: results scoped to each penalty window publication date,
+    #    enriched with reference winner info and log-time features.
+    df_results_by_penalty_window_prep = build_df_results_by_penalty_window_prep(
+        df_dim_registrations=df_dim_registrations,
+        df_dim_results=df_dim_results,
+        df_ext_races_by_penalty_window=df_ext_races_by_penalty_window,
     )
 
+    # B) Athlete-grain target table: one row per (season, publication date, gender, athlete),
+    #    optionally enriched with registration attributes (school/club/eligibility/etc).
+    #    Penalty arrays returned by the model functions are aligned to this row order.
     df_ext_athlete_penalties_prep = build_df_ext_athlete_penalties_prep(
-        df_log_ratio_times_by_publication_date=df_log_ratio_times_by_publication_date,
+        df_results_by_penalty_window_prep=df_results_by_penalty_window_prep,
         df_dim_registrations=df_dim_registrations,
     )
 
+    # C) 2025 method: infer athlete penalties from log(time / winner_time) comparisons,
+    #    then standardize across dates via first-date cohort anchoring.
     df_penalties_2025 = calculate_penalties_2025(
-        df_log_ratio_times_by_publication_date,
+        df_results_by_penalty_window_prep,
         target=df_ext_athlete_penalties_prep,
     )
 
-    df_results_by_penalty_window, df_penalties_2026 = calculate_penalties_2026(
-        df_log_ratio_times_by_publication_date,
+    # D) 2026 method: infer athlete penalties using race intercepts + athlete effects on log_time,
+    #    identify slow outlier races, refit excluding those outliers, and produce per-row diagnostics.
+    df_ext_results_by_penalty_window, df_penalties_2026 = calculate_penalties_2026(
+        df_results_by_penalty_window_prep,
         target=df_ext_athlete_penalties_prep,
     )
 
+    # E) Assemble final athlete-grain extract by attaching both penalty vintages.
+    #    Sorting by standardized_athlete_penalty_26 makes the "current" method’s ranking easy to read.
     df_ext_athlete_penalties = (
         df_ext_athlete_penalties_prep.assign(**df_penalties_2025)
         .assign(**df_penalties_2026)
@@ -651,4 +790,4 @@ def build_ext_athlete_penalties(
         .reset_index(drop=True)
     )
 
-    return df_results_by_penalty_window, df_ext_athlete_penalties
+    return df_ext_results_by_penalty_window, df_ext_athlete_penalties

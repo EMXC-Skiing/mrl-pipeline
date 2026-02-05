@@ -9,6 +9,11 @@ def build_dim_athletes(df_dim_registrations: pd.DataFrame) -> pd.DataFrame:
       df_dim_athletes
     """
 
+    # remove ghost registrations from consideration
+    df_dim_registrations = df_dim_registrations.loc[
+        ~df_dim_registrations["is_ghost_registration"].fillna(False)
+    ].copy()
+
     # distill most recent registration data to athletes table
     df_dim_athletes = (
         df_dim_registrations.sort_values(by="race_season", ascending=False)

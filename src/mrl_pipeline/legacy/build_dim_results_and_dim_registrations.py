@@ -220,22 +220,10 @@ def build_dim_registrations(
     athlete_name_replacements: dict,
     school_name_replacements: dict,
 ) -> pd.DataFrame:
-    """
-    Transform-only function (no warehouse IO). Assumes helper fns exist:
-      - calc_athlete_id(df) -> Series
-      - calc_registration_id(df) -> Series
+    df_all = df_stg_registrations.copy().convert_dtypes()
 
-    Inputs:
-      df_stg_registrations: already-fetched + concatenated staging registrations, with race_season present
-      athlete_name_replacements, school_name_replacements: artifacts from precursor function
-
-    Returns:
-      df_dim_registrations
-    """
-
-    df = df_stg_registrations.copy().convert_dtypes()
-
-    # drop rows that are not related to EHS/U16 race registration
+    # ---- partition rows: eligible categories + exact-match GHOST
+    cat = df_all["Category Entered / Merchandise Ordered"].astype("string")
     eligible_categories = [
         "U16/EHS Qualifer - Boys",
         "U16/EHS Qualifier - Girls",
@@ -244,14 +232,14 @@ def build_dim_registrations(
         "Late U16/EHS Mass Nordic Cup - Girls",
         "Late U16/EHS Mass Nordic Cup - Girls UNSEEDED",
     ]
-    df = df.loc[
-        df["Category Entered / Merchandise Ordered"]
-        .astype("string")
-        .str.strip()
-        .isin(eligible_categories)
-    ]
 
-    # define replacements and standardize inputs
+    is_eligible = cat.str.strip().isin(eligible_categories)
+    is_ghost = cat == "GHOST"  # exact match per requirement
+
+    df_eligible = df_all.loc[is_eligible].copy()
+    df_ghost = df_all.loc[is_ghost].copy()
+
+    # ---- common replacements
     club_name_replacements = {
         "I am not currently a member of a listed team or club": pd.NA,
         "My Team / Club is not listed.": pd.NA,
@@ -261,15 +249,8 @@ def build_dim_registrations(
     membership_number_replacements = {"NO LICENSE": "", "INTERNATIONAL": ""}
     gender_replacements = {"m": "b", "f": "g"}
 
-    # helpers local to this transform
     def pdnum(x):
         return pd.to_numeric(x, errors="coerce")
-
-    def fn_school_or_other(row):
-        school = row["School"]
-        other = row.get("SchoolOth")
-        val = school if school != "Other" else other
-        return val.title() if isinstance(val, str) else val
 
     def fn_full_names(row):
         first = row.get("First Name")
@@ -277,13 +258,16 @@ def build_dim_registrations(
         full = f"{first} {last}"
         return full.title() if isinstance(full, str) else full
 
+    def fn_school_or_other(row):
+        school = row.get("School")
+        other = row.get("SchoolOth")
+        val = school if school != "Other" else other
+        return val.title() if isinstance(val, str) else val
+
     def process_grade(s):
-        # Step 1: integer present
         for grade in range(7, 13):
             if str(grade) in str(s):
                 return grade
-
-        # Step 2: keyword map
         grade_keywords = {
             "freshman": 9,
             "firstyear": 9,
@@ -295,55 +279,105 @@ def build_dim_registrations(
         for keyword, grade in grade_keywords.items():
             if keyword in s_cleaned:
                 return grade
-
         return pd.NA
 
-    # Construct final DataFrame with standardized and transformed columns
-    df_dim_registrations = pd.DataFrame(
+    # ---- build eligible frame (existing logic, with nullable birth_year)
+    df_dim_eligible = pd.DataFrame(
         {
             "athlete_name": (
-                df.apply(fn_full_names, axis=1)
+                df_eligible.apply(fn_full_names, axis=1)
                 .astype("string")
                 .replace(athlete_name_replacements)
             ),
-            "race_season": pdnum(df["race_season"]).astype("int64"),
-            "city_town": df["City"].astype("string").str.title(),
-            "state": df["State"].astype("string").str.upper(),
+            "race_season": pdnum(df_eligible["race_season"]).astype("int64"),
+            "city_town": df_eligible.get("City", pd.NA).astype("string").str.title(),
+            "state": df_eligible.get("State", pd.NA).astype("string").str.upper(),
             "school": (
-                df.apply(fn_school_or_other, axis=1)
+                df_eligible.apply(fn_school_or_other, axis=1)
                 .replace(school_name_replacements)
                 .astype("string")
             ),
-            "club": df["Club"].replace(club_name_replacements).astype("string"),
-            "gender": df["Gender"]
-            .astype("string")
-            .str.lower()
-            .replace(gender_replacements),
+            "club": df_eligible.get("Club", pd.NA)
+            .replace(club_name_replacements)
+            .astype("string"),
+            "gender": (
+                df_eligible.get("Gender", pd.NA)
+                .astype("string")
+                .str.lower()
+                .replace(gender_replacements)
+            ),
             "nensa_number": (
                 pdnum(
-                    df["NENSA License"].replace(membership_number_replacements)
+                    df_eligible.get("NENSA License", pd.NA).replace(
+                        membership_number_replacements
+                    )
                 ).astype("Int64")
             ),
             "usss_number": (
                 pdnum(
-                    df["USSS Member #"].replace(membership_number_replacements)
+                    df_eligible.get("USSS Member #", pd.NA).replace(
+                        membership_number_replacements
+                    )
                 ).astype("Int64")
             ),
-            "birth_year": pdnum(df["Birth Year"]).astype("int64"),
-            "grade": pdnum(df["Grade"].apply(process_grade)).astype("Int64"),
+            "birth_year": pdnum(df_eligible.get("Birth Year", pd.NA)).astype("Int64"),
+            "grade": pdnum(df_eligible.get("Grade", pd.NA).apply(process_grade)).astype(
+                "Int64"
+            ),
+            "is_ghost_registration": False,
         }
+    )
+
+    # ---- build ghost frame (similar demographics, no grade/birth_year assumptions)
+    # NOTE: SchoolOth processing not required; using fn_school_or_other is fine either way.
+    df_dim_ghost = pd.DataFrame(
+        {
+            "athlete_name": (
+                df_ghost.apply(fn_full_names, axis=1)
+                .astype("string")
+                .replace(athlete_name_replacements)
+            ),
+            "race_season": pdnum(df_ghost["race_season"]).astype("int64"),
+            "city_town": df_ghost.get("City", pd.NA).astype("string").str.title(),
+            "state": df_ghost.get("State", pd.NA).astype("string").str.upper(),
+            "school": (
+                df_ghost.get("School", pd.NA)
+                .astype("string")
+                .str.title()
+                .replace(school_name_replacements)
+            ),
+            "club": df_ghost.get("Club", pd.NA)
+            .replace(club_name_replacements)
+            .astype("string"),
+            "gender": (
+                df_ghost.get("Gender", pd.NA)
+                .astype("string")
+                .str.lower()
+                .replace(gender_replacements)
+            ),
+            "nensa_number": pd.Series([pd.NA] * len(df_ghost), dtype="Int64"),
+            "usss_number": pd.Series([pd.NA] * len(df_ghost), dtype="Int64"),
+            "birth_year": pd.Series([pd.NA] * len(df_ghost), dtype="Int64"),
+            "grade": pd.Series([pd.NA] * len(df_ghost), dtype="Int64"),
+            "is_ghost_registration": True,
+        }
+    )
+
+    # ---- combine + sort
+    df_dim_registrations = pd.concat(
+        [df_dim_eligible, df_dim_ghost], ignore_index=True
     ).sort_values(by=["athlete_name", "race_season"], ascending=[True, False])
 
-    # calculate ids
+    # ---- ids (same helpers as required)
     df_dim_registrations["athlete_id"] = calc_athlete_id(df_dim_registrations)
     df_dim_registrations["registration_id"] = calc_registration_id(df_dim_registrations)
 
-    # US Ski & Snowboard age is the athlete's age at the end of December of a racing season
+    # ---- USSS age (nullable)
     df_dim_registrations["usss_age"] = (
-        df_dim_registrations["race_season"] - 1
-    ) - df_dim_registrations["birth_year"]
+        (df_dim_registrations["race_season"] - 1) - df_dim_registrations["birth_year"]
+    ).astype("Int64")
 
-    # add U16s and EHS qualification eligibility
+    # ---- eligibility flags
     df_dim_registrations["is_ehs_eligible"] = df_dim_registrations["grade"].isin(
         [9, 10, 11, 12]
     )
@@ -351,9 +385,10 @@ def build_dim_registrations(
         [14, 15]
     )
 
-    # filter to only registrations eligible for U16s or EHS
+    # ---- IMPORTANT: keep ghosts even though they're ineligible
     df_dim_registrations = df_dim_registrations.loc[
-        df_dim_registrations["is_ehs_eligible"]
+        df_dim_registrations["is_ghost_registration"]
+        | df_dim_registrations["is_ehs_eligible"]
         | df_dim_registrations["is_u16c_eligible"]
     ]
 
@@ -363,11 +398,13 @@ def build_dim_registrations(
         "athlete_id",
         "athlete_name",
         "gender",
+        "is_ghost_registration",
         "school",
         "club",
         "city_town",
         "state",
     ]
+
     df_dim_registrations = df_dim_registrations[
         leading_columns
         + [c for c in df_dim_registrations.columns if c not in leading_columns]

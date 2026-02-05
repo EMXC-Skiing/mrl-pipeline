@@ -506,19 +506,39 @@ class DataConnector:
 
         # Prefer the DataFrame path; fall back to iterables.
         if isinstance(data, DataFrame):
+            if data.empty:
+                return
             with SchemaGSheet(sh, "w") as schema_sheet:
                 schema_sheet.write_dataframe(data)
+            print(
+                f"{table_name}: wrote {data.shape[0]} rows, {data.shape[1]} columns to {sh.url}",
+                flush=True,
+            )
             return
 
+        total_rows = 0
+        num_cols: Optional[int] = None
+        wrote_any = False
+
         with SchemaGSheet(sh, "w") as schema_sheet:
-            wrote_any = False
             for df in data:
+                if df.empty:
+                    continue
                 wrote_any = True
+                total_rows += df.shape[0]
+                if num_cols is None:
+                    num_cols = df.shape[1]
                 schema_sheet.write_dataframe(df)
 
         if not wrote_any:
             # Make empty-iterable writes a no-op rather than silently creating a blank schema sheet.
             return
+
+        # num_cols can't be None if wrote_any is True, but keep it defensive.
+        print(
+            f"{table_name}: wrote {total_rows} rows, {num_cols or 0} columns to {sh.url}",
+            flush=True,
+        )
 
     def get_warehouse_table(
         self, table_name: str, return_url: bool = False

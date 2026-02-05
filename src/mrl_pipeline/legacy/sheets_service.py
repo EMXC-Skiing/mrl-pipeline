@@ -418,26 +418,59 @@ class TableVersionManager:
     def promote_temp_tables(self, archive_previous: bool = True) -> None:
         """
         Promote all registered TEMP tables to primary; optionally archive existing primary versions.
+        Emits verbose stdout describing each action taken.
         """
+        if not self.temp_tables:
+            print("No TEMP tables to promote.", flush=True)
+            return
+
         while self.temp_tables:
             table_name, (table_ref, sheet_url) = self.temp_tables.popitem()
 
+            print(
+                f"{table_name}: promoting TEMP → primary",
+                flush=True,
+            )
+
             try:
                 previous_sheet = self.gc.open(table_ref["primary"])
+                had_previous = True
+                print(
+                    f"{table_name}: found existing primary sheet",
+                    flush=True,
+                )
             except SpreadsheetNotFound:
                 previous_sheet = None
+                had_previous = False
+                print(
+                    f"{table_name}: no existing primary sheet found",
+                    flush=True,
+                )
 
             # Promote temp -> primary
             new_sheet = self.gc.open_by_url(sheet_url)
             new_sheet.update_title(table_ref["primary"])
 
-            if previous_sheet is None:
+            print(
+                f"{table_name}: TEMP sheet promoted to '{table_ref['primary']}'",
+                flush=True,
+            )
+
+            if not had_previous:
                 continue
 
             if archive_previous:
                 previous_sheet.update_title(table_ref["archive"])
+                print(
+                    f"{table_name}: archived previous primary as '{table_ref['archive']}'",
+                    flush=True,
+                )
             else:
                 self.gc.del_spreadsheet(previous_sheet.id)
+                print(
+                    f"{table_name}: deleted previous primary sheet",
+                    flush=True,
+                )
 
 
 # =============================================================================

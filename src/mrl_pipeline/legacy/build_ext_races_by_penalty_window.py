@@ -142,7 +142,6 @@ def build_ext_races_by_penalty_window(
                 stacklevel=2,
             )
 
-    # --- Existing transform ---------------------------------------------------------
     df_penalty_windows = calculate_penalty_windows(
         df_prep_penalty_publication_dates=df_prep_penalty_publication_dates,
         df_prep_penalty_contribution_windows=df_prep_penalty_contribution_windows,

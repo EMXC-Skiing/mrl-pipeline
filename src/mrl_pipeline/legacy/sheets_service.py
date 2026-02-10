@@ -21,6 +21,7 @@ from typing import (
     overload,
 )
 
+from googleapiclient.discovery import build
 import gspread
 import pytz
 from google.oauth2.service_account import Credentials
@@ -370,12 +371,75 @@ class TableVersionManager:
         env_folder_ids: Mapping[str, str],
         env: str = "prod",
         timestamp: Optional[str] = None,
+        # NEW: a google.oauth2 Credentials object (same identity as gspread) so we can use Drive API
+        drive_creds: Optional[Any] = None,
     ) -> None:
         self.gc = gclient
         self.env_folder_ids = dict(env_folder_ids)
         self.env = env
         self.timestamp = timestamp or return_timestamp()
         self.temp_tables: Dict[str, Tuple[TableVersionRef, str]] = {}
+
+        self._drive_creds = drive_creds
+        self._drive_service = None
+
+    def _drive(self) -> Any:
+        """
+        Lazily build a Drive API service using the same credentials as gspread.
+        """
+        if self._drive_service is None:
+            if self._drive_creds is None:
+                raise ValueError(
+                    "Drive credentials not provided to TableVersionManager. "
+                    "Pass drive_creds=... when constructing it."
+                )
+            self._drive_service = build("drive", "v3", credentials=self._drive_creds)
+        return self._drive_service
+
+    def _find_latest_sheet_id_in_env_folder(self, sheet_name: str) -> str:
+        """
+        Search within the env folder for a spreadsheet with exact name == sheet_name,
+        and return the most recently created match's file id.
+
+        This avoids gspread's open(title) behavior and is Shared Drive-safe.
+        """
+        folder_id = self.env_folder_ids.get(self.env)
+        if not folder_id:
+            raise ValueError(f"No folder ID specified for environment '{self.env}'.")
+
+        # Escape single quotes for Drive query language
+        safe_name = sheet_name.replace("'", "\\'")
+
+        q = (
+            f"'{folder_id}' in parents and "
+            f"name = '{safe_name}' and "
+            "mimeType = 'application/vnd.google-apps.spreadsheet' and "
+            "trashed = false"
+        )
+
+        drive = self._drive()
+        resp = (
+            drive.files()
+            .list(
+                q=q,
+                fields="files(id,name,createdTime,webViewLink)",
+                orderBy="createdTime desc",
+                pageSize=10,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora="allDrives",
+            )
+            .execute()
+        )
+
+        files = resp.get("files", [])
+        if not files:
+            raise ValueError(
+                f"No table found for '{sheet_name}' in env='{self.env}' "
+                f"(Drive folder-scoped search returned 0 matches)."
+            )
+
+        return files[0]["id"]
 
     def create_table(
         self, table_name: str, lifecycle_management: bool = True
@@ -402,18 +466,37 @@ class TableVersionManager:
     def retrieve_latest(self, table_name: str) -> Spreadsheet:
         """
         Return the TEMP version if present; otherwise return the primary version.
+
+        PATCHED:
+        - TEMP: open by URL (since we already have it) to avoid name search.
+        - PRIMARY: locate by Drive folder-scoped exact-name search, choose most recent,
+          then open_by_key(file_id) to avoid gspread.open(title) quirks.
         """
         table_ref = TableVersionRef(table_name, env=self.env, timestamp=self.timestamp)
 
+        # If a TEMP exists in this process, open it by URL rather than by title.
         if table_name in self.temp_tables:
-            return self.gc.open(table_ref["temp"])
+            _, sheet_url = self.temp_tables[table_name]
+            return self.gc.open_by_url(sheet_url)
+
+        primary_name = table_ref["primary"]
+        if not primary_name:
+            raise ValueError(
+                f"Could not compute primary name for table '{table_name}'."
+            )
 
         try:
-            return self.gc.open(table_ref["primary"])
-        except SpreadsheetNotFound as e:
+            file_id = self._find_latest_sheet_id_in_env_folder(primary_name)
+        except Exception as e:
+            # Preserve original external error contract as much as possible.
+            # Downstream code expects ValueError("No table found for ... env=...") sometimes.
+            if isinstance(e, ValueError) and "No table found" in str(e):
+                raise
             raise ValueError(
                 f"No table found for '{table_name}' in env='{self.env}'."
             ) from e
+
+        return self.gc.open_by_key(file_id)
 
     def promote_temp_tables(self, archive_previous: bool = True) -> None:
         """
@@ -519,6 +602,7 @@ class DataConnector:
             self.gc,
             env_folder_ids=self.warehouse_folder_ids,
             env=self.env,
+            drive_creds=creds,
             **kwargs,
         )
 

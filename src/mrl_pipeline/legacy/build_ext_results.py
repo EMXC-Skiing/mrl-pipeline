@@ -6,7 +6,7 @@ import duckdb
 import pandas as pd
 
 
-def build_df_ext_results_duckdb(
+def build_df_ext_results(
     df_prep_penalty_contributions: pd.DataFrame,
     df_ext_athlete_penalties: pd.DataFrame,
     df_dim_results: pd.DataFrame,

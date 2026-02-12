@@ -112,10 +112,6 @@ High-Level Flow
 -------------------------------------------------------------------------------
 Notes
 
-    - Geometric means are computed via:
-          EXP(AVG(LN(x)))
-      (DuckDB does not provide a built-in GEOMEAN aggregate.)
-
     - All joins are LEFT JOIN unless logic requires filtering.
 
     - Null race_penalty values indicate that the race is unscorable
@@ -228,13 +224,13 @@ race_penalties_and_times AS (
         p.gender,
 
         -- 25: top 5 places, penalty_25
-        EXP(AVG(LN(p.athlete_penalty_25))) FILTER (
+        GEOMEAN(p.athlete_penalty_25) FILTER (
             WHERE p.penaltied_athlete_count_25 >= 3
                 AND p.penaltied_athlete_place_25 BETWEEN 1 AND 5
                 AND p.athlete_penalty_25 IS NOT NULL
         ) AS mean_podium_seed_25,
 
-        EXP(AVG(LN(p.time_float))) FILTER (
+        GEOMEAN(p.time_float) FILTER (
             WHERE p.penaltied_athlete_count_25 >= 3
                 AND p.penaltied_athlete_place_25 BETWEEN 1 AND 5
                 AND p.time_float IS NOT NULL
@@ -242,13 +238,13 @@ race_penalties_and_times AS (
         ) AS mean_podium_time_25,
 
         -- 26: top 6 places, penalty_26
-        EXP(AVG(LN(p.athlete_penalty_26))) FILTER (
+        GEOMEAN(p.athlete_penalty_26) FILTER (
             WHERE p.penaltied_athlete_count_26 >= 3
                 AND p.penaltied_athlete_place_26 BETWEEN 1 AND 6
                 AND p.athlete_penalty_26 IS NOT NULL
         ) AS mean_podium_seed_26,
 
-        EXP(AVG(LN(p.time_float))) FILTER (
+        GEOMEAN(p.time_float) FILTER (
             WHERE p.penaltied_athlete_count_26 >= 3
                 AND p.penaltied_athlete_place_26 BETWEEN 1 AND 6
                 AND p.time_float IS NOT NULL

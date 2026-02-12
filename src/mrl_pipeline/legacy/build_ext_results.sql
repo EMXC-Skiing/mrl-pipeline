@@ -218,43 +218,29 @@ df_results_with_athlete_penalties AS (
 ),
 
 -- 4) Race penalties (compute BOTH 25 and 26 in parallel)
-race_penalties_and_times AS (
+
+race_penalties_and_times_25 AS (
     SELECT
-        p.race_id,
-        p.gender,
+        race_id,
+        gender,
+        GEOMETRIC_MEAN(athlete_penalty_25) AS mean_podium_seed_25,
+        GEOMETRIC_MEAN(time_float) AS mean_podium_time_25
+    FROM df_results_with_athlete_penalties 
+    WHERE penaltied_athlete_count_25 >=3
+        AND penaltied_athlete_place_25 BETWEEN 1 and 5
+    GROUP BY race_id, gender
+),
 
-        -- 25: top 5 places, penalty_25
-        GEOMEAN(p.athlete_penalty_25) FILTER (
-            WHERE p.penaltied_athlete_count_25 >= 3
-                AND p.penaltied_athlete_place_25 BETWEEN 1 AND 5
-                AND p.athlete_penalty_25 IS NOT NULL
-        ) AS mean_podium_seed_25,
-
-        GEOMEAN(p.time_float) FILTER (
-            WHERE p.penaltied_athlete_count_25 >= 3
-                AND p.penaltied_athlete_place_25 BETWEEN 1 AND 5
-                AND p.time_float IS NOT NULL
-                AND p.time_float > 0
-        ) AS mean_podium_time_25,
-
-        -- 26: top 6 places, penalty_26
-        GEOMEAN(p.athlete_penalty_26) FILTER (
-            WHERE p.penaltied_athlete_count_26 >= 3
-                AND p.penaltied_athlete_place_26 BETWEEN 1 AND 6
-                AND p.athlete_penalty_26 IS NOT NULL
-        ) AS mean_podium_seed_26,
-
-        GEOMEAN(p.time_float) FILTER (
-            WHERE p.penaltied_athlete_count_26 >= 3
-                AND p.penaltied_athlete_place_26 BETWEEN 1 AND 6
-                AND p.time_float IS NOT NULL
-                AND p.time_float > 0
-        ) AS mean_podium_time_26,
-
-        -- keep top registered finisher time (shared)
-        MIN(CASE WHEN p.is_registered_finish THEN p.time_float ELSE NULL END) AS top_registered_finisher_time
-    FROM df_results_with_athlete_penalties AS p
-    GROUP BY p.race_id, p.gender
+race_penalties_and_times_26 AS (
+    SELECT
+        race_id,
+        gender,
+        GEOMETRIC_MEAN(athlete_penalty_26) AS mean_podium_seed_26,
+        GEOMETRIC_MEAN(time_float) AS mean_podium_time_26
+    FROM df_results_with_athlete_penalties 
+    WHERE penaltied_athlete_count_26 >=3
+        AND penaltied_athlete_place_26 BETWEEN 1 and 6
+    GROUP BY race_id, gender
 ),
 
 df_race_penalties AS (
@@ -264,16 +250,18 @@ df_race_penalties AS (
         races.race_date,
         g.gender,
 
-        ROUND(pt.mean_podium_seed_25, 2) AS race_penalty_25,
-        pt.mean_podium_time_25 AS race_penalty_time_25,
+        ROUND(pt25.mean_podium_seed_25, 2) AS race_penalty_25,
+        pt25.mean_podium_time_25 AS race_penalty_time_25,
 
-        ROUND(pt.mean_podium_seed_26, 2) AS race_penalty_26,
-        pt.mean_podium_time_26 AS race_penalty_time_26
+        ROUND(pt26.mean_podium_seed_26, 2) AS race_penalty_26,
+        pt26.mean_podium_time_26 AS race_penalty_time_26
 
     FROM df_dim_races AS races
     CROSS JOIN (VALUES ('b'), ('g')) AS g(gender)
-    LEFT JOIN race_penalties_and_times AS pt
-        ON (races.race_id = pt.race_id AND g.gender = pt.gender)
+    LEFT JOIN race_penalties_and_times_25 AS pt25
+        ON (races.race_id = pt25.race_id AND g.gender = pt25.gender)
+    LEFT JOIN race_penalties_and_times_26 AS pt26
+        ON (races.race_id = pt26.race_id AND g.gender = pt26.gender)        
     ORDER BY races.race_date, races.race_id, g.gender
 )
 

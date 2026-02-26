@@ -49,7 +49,7 @@ class Settings(BaseSettings):
         default="mrl", description="Name of DuckDB database name."
     )
 
-    schema_name: str = Field(default="", description="Schema name in DuckDB.")
+    schema_name: str = Field(default="mrl_dev", description="Schema name in DuckDB.")
 
     db_table_suffix: str = Field(
         default="", description="Suffix attached to table names in DuckDB."

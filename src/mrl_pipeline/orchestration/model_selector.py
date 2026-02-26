@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Sequence, Set
 import networkx as nx
 
 from mrl_pipeline import models as models_pkg
-from mrl_pipeline.models.pipeline_model import PipelineModel
+from mrl_pipeline.models.warehouse_operation import PipelineModel
 
 
 def _discover_models() -> Dict[str, PipelineModel]:

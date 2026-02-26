@@ -13,8 +13,10 @@ from mrl_pipeline.io.google_sheets_warehouse_manager.resilient_gspread_client im
 )
 from mrl_pipeline.io.google_sheets_warehouse_manager.schema_gsheet import SchemaGSheet
 from mrl_pipeline.io.warehouse_service import (
+    AuthCredentials,
+    PrepTableService,
     TableVersionRef,
-    WarehouseService,
+    WarehouseTableService,
     _default_timestamp,
 )
 from mrl_pipeline.settings import settings
@@ -116,17 +118,15 @@ class TableVersionManager:
                     self.gc.del_spreadsheet(previous_sheet.id)
 
 
-class SheetService(WarehouseService):
+class SheetService(WarehouseTableService, PrepTableService):
     def __init__(
         self,
         env: str,
-        auth_credentials: Optional[str] = None,
+        auth_credentials: AuthCredentials = None,
         warehouse_folder_id_env_var: str = "MNP_GOOGLE_DRIVE_WAREHOUSE_FOLDER_IDS",
         **kwargs,
     ):
         super().__init__(env=env, auth_credentials=auth_credentials, **kwargs)
-
-        self.env = env
         attr_name = warehouse_folder_id_env_var.lower()
         folder_ids = getattr(settings, attr_name, None)
         if folder_ids is None:

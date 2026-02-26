@@ -3,7 +3,6 @@
 import json
 import os
 import pathlib
-import re
 
 from dotenv import load_dotenv
 
@@ -15,22 +14,6 @@ CONFIG_DIR = ROOT_DIR / "config"
 LOG_DIR = ROOT_DIR / "logs"
 
 duckdb_path = DB_DIR / "mrl.duckdb"
-
-
-def sanitize_table_name(name: str) -> str:
-    """Sanitizes and validates a table name, allowing only alphanumeric characters,
-    underscores, and plus signs.
-
-    Args:
-        name (str): The original table name.
-
-    Returns:
-        str: The sanitized table name.
-
-    """
-    stripped = re.sub(r"[^a-zA-Z0-9_+]", "", name)  # Remove invalid characters
-    return stripped.lower()  # Convert to lowercase
-
 
 def fetch_environ(name: str) -> str:
     """Retrieve configuration values from the environment or module globals.

@@ -14,23 +14,24 @@ from pandas import DataFrame
 from mrl_pipeline.io.database_connectors import (
     DatabaseConnector,
 )
+from mrl_pipeline.io.table_version_ref import escape_table_name, sanitize_table_name
 from mrl_pipeline.io.warehouse_service import (
+    AuthCredentials,
     TableVersionRef,
-    WarehouseService,
+    WarehouseTableService,
     _default_timestamp,
 )
 from mrl_pipeline.settings import settings
-from mrl_pipeline.utils import sanitize_table_name
 
 
-class DuckDBWarehouseService(WarehouseService):
-    """WarehouseService implementation backed by DuckDB tables."""
+class DuckDBWarehouseService(WarehouseTableService):
+    """WarehouseTableService implementation backed by DuckDB tables."""
 
     def __init__(
         self,
         *,
-        auth_credentials: Optional[Any] = None,
-        env_name: Optional[str],
+        auth_credentials: AuthCredentials = None,
+        env: Optional[str],
         local_duckdb_path: Optional[str],
         schema_name: Optional[str],
         table_suffix: Optional[str],
@@ -40,9 +41,9 @@ class DuckDBWarehouseService(WarehouseService):
         timestamp: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(auth_credentials=auth_credentials, env=env, **kwargs)
+        super().__init__(auth_credentials=auth_credentials, env=env or "prod", **kwargs)
 
-        extra_timestamp = self.extra_options.pop("timestamp", None)
+        extra_timestamp = self._extra_options.pop("timestamp", None)
         schema_token = sanitize_table_name(schema) if schema else ""
         self.schema = schema_token or "main"
         self.env_token = sanitize_table_name(self.env)
@@ -126,18 +127,22 @@ class DuckDBWarehouseService(WarehouseService):
                         if archive_previous:
                             if self._table_exists(conn, archive_name):
                                 conn.execute(
-                                    f"DROP TABLE {self._qualified(archive_name)}"
+                                    f"DROP TABLE {escape_table_name(archive_name)}"
                                 )
+                            archive_target = escape_table_name(archive_name)
                             conn.execute(
-                                f"ALTER TABLE {self._qualified(primary_name)} "
-                                f"RENAME TO {self._quote_identifier(archive_name)}",
+                                f"ALTER TABLE {escape_table_name(primary_name)} "
+                                f"RENAME TO {archive_target}",
                             )
                         else:
-                            conn.execute(f"DROP TABLE {self._qualified(primary_name)}")
+                            conn.execute(
+                                f"DROP TABLE {escape_table_name(primary_name)}"
+                            )
 
+                    primary_target = escape_table_name(primary_name)
                     conn.execute(
-                        f"ALTER TABLE {self._qualified(temp_name)} "
-                        f"RENAME TO {self._quote_identifier(primary_name)}",
+                        f"ALTER TABLE {escape_table_name(temp_name)} "
+                        f"RENAME TO {primary_target}",
                     )
 
                 conn.execute("COMMIT")
@@ -148,22 +153,6 @@ class DuckDBWarehouseService(WarehouseService):
             except Exception:  # noqa: BLE001
                 conn.execute("ROLLBACK")
                 raise
-
-    def get_prep_table(
-        self,
-        sheet_name: str,
-        *,
-        worksheet_name: Optional[str] = None,
-        return_url: bool = False,
-    ) -> Union[DataFrame, Tuple[DataFrame, str]]:
-        raise NotImplementedError(
-            "DuckDBWarehouseService does not support loading prep tables.",
-        )
-
-    def iter_prep_tables(self, sheet_name: str) -> Iterable[Tuple[str, DataFrame]]:
-        raise NotImplementedError(
-            "DuckDBWarehouseService does not support iterating prep tables.",
-        )
 
     def _extract_database_path(
         self,
@@ -211,25 +200,11 @@ class DuckDBWarehouseService(WarehouseService):
         try:
             if self.schema.lower() != "main":
                 conn.execute(
-                    f"CREATE SCHEMA IF NOT EXISTS {self._quote_identifier(self.schema)}"
+                    f"CREATE SCHEMA IF NOT EXISTS {escape_table_name(self.schema)}"
                 )
             yield conn
         finally:
             conn.close()
-
-    @staticmethod
-    def _quote_identifier(name: str) -> str:
-        # Escape embedded quotes by doubling them, per SQL standard
-        # Note we have already sanitized the name to avoid quotes; this is just in case.
-        safe = name.replace('"', '""')
-        return f'"{safe}"'
-
-    def _qualified(self, table_name: str) -> str:
-        # Return a schema-qualified table name with proper quoting
-        return (
-            f"{self._quote_identifier(self.schema)}."
-            f"{self._quote_identifier(table_name)}"
-        )
 
     def _table_ref(self, table_name: str) -> TableVersionRef:
         return TableVersionRef(
@@ -271,13 +246,16 @@ class DuckDBWarehouseService(WarehouseService):
     ) -> None:
         temp_view = f"_df_{uuid.uuid4().hex}"
         conn.register(temp_view, df)
-        qualified = self._qualified(table_name)
+        quoted_table_name = escape_table_name(table_name)
         try:
             if append:
-                conn.execute(f"INSERT INTO {qualified} SELECT * FROM {temp_view}")
+                conn.execute(
+                    f"INSERT INTO {quoted_table_name} SELECT * FROM {temp_view}"
+                )
             else:
                 conn.execute(
-                    f"CREATE OR REPLACE TABLE {qualified} AS SELECT * FROM {temp_view}"
+                    f"CREATE OR REPLACE TABLE {quoted_table_name} "
+                    f"AS SELECT * FROM {temp_view}"
                 )
         finally:
             conn.unregister(temp_view)
@@ -290,7 +268,7 @@ class DuckDBWarehouseService(WarehouseService):
         return conn.execute(query, [self.schema, table_name]).fetchone() is not None
 
     def _read_table(self, conn: DuckDBPyConnection, table_name: str) -> DataFrame:
-        return conn.execute(f"SELECT * FROM {self._qualified(table_name)}").df()
+        return conn.execute(f"SELECT * FROM {escape_table_name(table_name)}").df()
 
     def _prep_table_name(
         self,

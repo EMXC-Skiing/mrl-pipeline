@@ -9,7 +9,8 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple, Union
 
 from pandas import DataFrame
 
-from mrl_pipeline.io.table_version_ref import TableVersionRef, _default_timestamp
+from mrl_pipeline.io.table_version_ref import TableVersionRef
+from mrl_pipeline.io.utils import _default_timestamp
 from mrl_pipeline.settings import settings
 
 AuthCredentials = Optional[Union[str, Path, Mapping[str, Any]]]

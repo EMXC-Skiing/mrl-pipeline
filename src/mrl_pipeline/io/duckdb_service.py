@@ -14,12 +14,15 @@ from pandas import DataFrame
 from mrl_pipeline.io.database_connectors import (
     DatabaseConnector,
 )
-from mrl_pipeline.io.table_version_ref import escape_table_name, sanitize_table_name
+from mrl_pipeline.io.utils import (
+    _default_timestamp,
+    escape_table_name,
+    sanitize_table_name,
+)
 from mrl_pipeline.io.warehouse_service import (
     AuthCredentials,
     TableVersionRef,
     WarehouseTableService,
-    _default_timestamp,
 )
 from mrl_pipeline.settings import settings
 

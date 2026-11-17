@@ -8,7 +8,7 @@ from typing import Optional, Union
 import duckdb
 from duckdb import DuckDBPyConnection
 
-from mrl_pipeline.io.table_version_ref import escape_table_name
+from mrl_pipeline.io.utils import escape_table_name
 from mrl_pipeline.settings import settings
 
 

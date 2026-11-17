@@ -6,7 +6,7 @@ from duckdb import BinderException, DuckDBPyConnection
 from tqdm import tqdm
 
 from mrl_pipeline.io.database_connectors import DatabaseConnector
-from mrl_pipeline.io.table_version_ref import sanitize_table_name
+from mrl_pipeline.io.utils import sanitize_table_name
 from mrl_pipeline.models.pipeline_model import PipelineModel
 
 

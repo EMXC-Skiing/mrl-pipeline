@@ -1,7 +1,6 @@
 import json
 import os
 from pathlib import Path
-from typing import Optional
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -12,12 +11,12 @@ from mrl_pipeline.io.google_sheets_warehouse_manager.resilient_gspread_client im
     ResilientGspreadClient,
 )
 from mrl_pipeline.io.google_sheets_warehouse_manager.schema_gsheet import SchemaGSheet
+from mrl_pipeline.io.utils import _default_timestamp
 from mrl_pipeline.io.warehouse_service import (
     AuthCredentials,
     PrepTableService,
     TableVersionRef,
     WarehouseTableService,
-    _default_timestamp,
 )
 from mrl_pipeline.settings import settings
 
@@ -156,7 +155,8 @@ class SheetService(WarehouseTableService, PrepTableService):
                 raw_credentials = os.getenv("GOOGLE_SERVICE_ACCOUNT_CREDENTIALS")
             if raw_credentials is None:
                 raise RuntimeError(
-                    "Missing configuration value for 'GOOGLE_SERVICE_ACCOUNT_CREDENTIALS'.",
+                    "Missing configuration value for "
+                    "'GOOGLE_SERVICE_ACCOUNT_CREDENTIALS'.",
                 )
         if isinstance(raw_credentials, dict):
             creds_info = raw_credentials

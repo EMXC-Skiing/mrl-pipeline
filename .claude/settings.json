@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./config/**)", "Edit(./config/**)",
+      "Read(./data/**)",   "Edit(./data/**)",
+      "Read(./logs/**)",   "Edit(./logs/**)",
+      "Read(./db/**)",     "Edit(./db/**)",
+      "Read(./**/*.env)",  "Read(./**/service.json)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "failIfUnavailable": true,
+    "filesystem": {
+      "denyRead":  ["./config", "./data", "./logs", "./db"],
+      "denyWrite": ["./config", "./data", "./logs", "./db"]
+    }
+  }
+}

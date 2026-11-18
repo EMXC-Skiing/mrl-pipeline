@@ -54,6 +54,12 @@ The remote is `origin` (GitHub, `EMXC-Skiing/mrl-pipeline`). `main` is protected
 - Branch names: `feat/<topic>`, `fix/<topic>`, `docs/<topic>`; for the rewrite, `v2/phase-<n>-<topic>` (e.g. `v2/phase-1-settings`).
 - One phase (or one coherent piece of a phase) per branch, so each PR is reviewable.
 
+**The v2 rewrite uses an umbrella branch, `v2/rewrite`.**
+- Each phase branch `v2/phase-<n>-…` is created from the current `v2/rewrite` and merged back into it by PR. Phase PRs target `v2/rewrite`, **not** `main`.
+- `v2/rewrite` is merged into `main` once, at cutover (Phase 8), by the owner.
+- `main` stays on working v1 code until then. Fixes v1 needs in the meantime go on a `fix/…` branch from `main`; afterwards, merge `main` into `v2/rewrite` (ask first).
+- Before starting a phase, bring `v2/rewrite` up to date with the merged previous phase, and branch from that.
+
 **Commits**
 - Commit only when the owner asks, or at a checkpoint the owner has agreed to for the task. Never commit as a side effect of something else.
 - Small, single-purpose commits; don't mix refactors, behavior changes and doc updates without saying so in the message.
@@ -64,7 +70,7 @@ The remote is `origin` (GitHub, `EMXC-Skiing/mrl-pipeline`). `main` is protected
 
 **Pushing and PRs**
 - Ask before every push. Never force-push to a shared branch; never push to `main`.
-- Open PRs with `gh pr create` against `main` only when asked. The description lists what changed, the phase and requirement IDs covered, test results, and anything left undone or deliberately skipped.
+- Open PRs with `gh pr create` only when asked: against `v2/rewrite` for phase branches, against `main` for everything else. The description lists what changed, the phase and requirement IDs covered, test results, and anything left undone or deliberately skipped.
 - Don't merge PRs, delete remote branches, or change GitHub settings.
 
 **Destructive operations** — `reset --hard`, `checkout -- <file>`, `clean`, `branch -D`, `rebase`, `stash drop`: ask first, and say what would be lost. Uncommitted work in this repo may be the owner's.
